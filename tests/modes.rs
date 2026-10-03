@@ -1,8 +1,12 @@
+//! Progressive, arithmetic, optimised and restart variants carry the same
+//! quantised coefficients as the baseline file, so they must decode to
+//! exactly the same pixels; and every file must pass the strict decoder.
+
 mod common;
 use jpeg::{EncodeSettings, PixelFormat, Subsampling};
 
 #[test]
-fn smoke() {
+fn every_mode_decodes_to_the_baseline_pixels() {
     let (w, h) = (97, 61);
     let rgb = common::picture(w, h);
     for sub in [Subsampling::S444, Subsampling::S422, Subsampling::S420, Subsampling::S440] {
