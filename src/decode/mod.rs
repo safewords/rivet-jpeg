@@ -218,20 +218,11 @@ pub(crate) struct Frame {
     pub(crate) width: usize,
     pub(crate) height: usize,
     pub(crate) comps: Vec<FrameComp>,
-    pub(crate) hmax: usize,
-    pub(crate) vmax: usize,
     pub(crate) mcus_x: usize,
     pub(crate) mcus_y: usize,
     pub(crate) progressive: bool,
     pub(crate) lossless: bool,
     pub(crate) arithmetic: bool,
-}
-
-impl Frame {
-    /// Pixels per data unit edge: 8 for DCT, 1 for lossless.
-    pub(crate) fn unit(&self) -> usize {
-        if self.lossless { 1 } else { 8 }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -625,7 +616,7 @@ impl<'a> Decoder<'a> {
             c.stride = mcus_x * c.h * unit;
             c.rows = mcus_y * c.v * unit;
         }
-        let frame = Frame { sof: m, precision, width, height, comps, hmax, vmax, mcus_x, mcus_y, progressive, lossless, arithmetic };
+        let frame = Frame { sof: m, precision, width, height, comps, mcus_x, mcus_y, progressive, lossless, arithmetic };
         // Allocate: planes (mid-grey, so missing data shows as grey), and
         // the coefficient store of a progressive frame.
         let mid = if lossless { 0 } else { 1u16 << (precision - 1) };
@@ -716,10 +707,10 @@ impl<'a> Decoder<'a> {
     }
 
     fn parse_dac(&mut self, p: &[u8]) -> Result<()> {
-        if p.len() % 2 != 0 {
+        if !p.len().is_multiple_of(2) {
             return Err(invalid("DAC segment length is odd"));
         }
-        for c in p.chunks_exact(2) {
+        for c in p.as_chunks::<2>().0 {
             let (tc, tb, cs) = (c[0] >> 4, usize::from(c[0] & 15), c[1]);
             if tc > 1 || tb > 3 {
                 return Err(invalid(format!("arithmetic conditioning class {tc}, destination {tb}")));

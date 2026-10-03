@@ -141,13 +141,6 @@ impl<'a> BitReader<'a> {
         if n == 0 { (0, 0) } else { ((self.buf >> (64 - n)) as u32, n) }
     }
 
-    /// Drop the buffered bits and return the position of the next unread
-    /// byte (the marker's 0xFF when one stopped loading). Bytes already
-    /// buffered as data are counted as read.
-    pub(crate) fn finish(self) -> usize {
-        self.pos
-    }
-
     /// Discard buffered bits and move to `pos`, for a restart.
     pub(crate) fn reset_at(&mut self, pos: usize) {
         self.pos = pos;
@@ -156,10 +149,6 @@ impl<'a> BitReader<'a> {
         self.pad = 0;
         self.marker = None;
         self.overrun = false;
-    }
-
-    pub(crate) fn data(&self) -> &'a [u8] {
-        self.data
     }
 
     pub(crate) fn pos(&self) -> usize {

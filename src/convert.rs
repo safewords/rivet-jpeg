@@ -149,6 +149,8 @@ impl Image {
     }
 
     /// RGB at the frame's precision, `width x height x 3`, through `f`.
+    // The loops index several component lines at once.
+    #[allow(clippy::needless_range_loop)]
     fn rgb_lines(&self, mut f: impl FnMut(usize, &[[u16; 3]])) {
         let (w, h) = (self.info.width as usize, self.info.height as usize);
         let max = (1i64 << self.info.precision) - 1;

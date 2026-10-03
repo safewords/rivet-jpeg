@@ -68,7 +68,7 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
     let total = mcus_x * mcus_y;
     let mut m = 0usize;
     'mcus: while m < total {
-        if ri > 0 && m > 0 && m % ri == 0 {
+        if ri > 0 && m > 0 && m.is_multiple_of(ri) {
             let pos = huff.as_ref().map_or_else(|| ari.as_ref().map_or(0, |a| a.pos()), |h| h.pos());
             let (found, clean) = find_restart(data, pos, next_rst);
             if !clean {

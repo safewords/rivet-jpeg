@@ -29,7 +29,7 @@ fn read_ref(p: &Path) -> Ref {
     let samples: Vec<u16> = if bits <= 8 {
         body.iter().map(|&b| u16::from(b)).collect()
     } else {
-        body.chunks_exact(2).map(|b| u16::from_be_bytes([b[0], b[1]])).collect()
+        body.as_chunks::<2>().0.iter().map(|b| u16::from_be_bytes(*b)).collect()
     };
     assert_eq!(samples.len(), w * h * c, "{}", p.display());
     Ref { w, h, c, bits, samples }

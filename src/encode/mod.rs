@@ -248,7 +248,7 @@ pub fn encode(pixels: &[u8], width: u32, height: u32, format: PixelFormat, setti
             } else {
                 standard_tables()
             };
-            write_dht(&mut out, &comps, scan, &tables, settings.progressive);
+            write_dht(&mut out, &comps, scan, &tables);
             sos(&mut out, &comps, scan);
             huff::encode_scan(&mut out, &comps, &layout, scan, &tables, settings.progressive)?;
         }
@@ -291,16 +291,12 @@ fn standard_tables() -> Tables {
 }
 
 /// The tables the scan uses, in one DHT segment.
-fn write_dht(out: &mut Vec<u8>, comps: &[CompCoefs], scan: &ScanSpec, tables: &Tables, progressive: bool) {
+fn write_dht(out: &mut Vec<u8>, comps: &[CompCoefs], scan: &ScanSpec, tables: &Tables) {
     let mut p = Vec::new();
-    let slots: Vec<usize> = {
-        let mut s: Vec<usize> =
-            comps.iter().enumerate().filter(|(i, _)| scan.comps & (1 << i) != 0).map(|(_, c)| c.table).collect();
-        s.dedup();
-        s.sort_unstable();
-        s.dedup();
-        s
-    };
+    let mut slots: Vec<usize> =
+        comps.iter().enumerate().filter(|(i, _)| scan.comps & (1 << i) != 0).map(|(_, c)| c.table).collect();
+    slots.sort_unstable();
+    slots.dedup();
     let dc = scan.ss == 0 && scan.ah == 0;
     let ac = scan.se > 0;
     for &slot in &slots {
@@ -311,7 +307,6 @@ fn write_dht(out: &mut Vec<u8>, comps: &[CompCoefs], scan: &ScanSpec, tables: &T
             push_table(&mut p, 1, slot, &tables[slot].1);
         }
     }
-    let _ = progressive;
     if !p.is_empty() {
         segment(out, 0xC4, &p);
     }

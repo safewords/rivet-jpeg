@@ -127,7 +127,7 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
     let mut m = 0usize;
     let mut end = ScanEnd::Complete;
     'mcus: while m < total {
-        if ri > 0 && m > 0 && m % ri == 0 {
+        if ri > 0 && m > 0 && m.is_multiple_of(ri) {
             // Restart: the entropy decoder stops at the marker; find it.
             let (pos, clean_bits) = match &ent {
                 Entropy::Huff(h) => {

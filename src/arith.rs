@@ -160,10 +160,6 @@ impl<'a> ArithDecoder<'a> {
         d != 0
     }
 
-    pub(crate) fn marker(&self) -> Option<u8> {
-        self.marker
-    }
-
     /// Whether well over what a coder flush could leave out has been read
     /// past the end of the data: the file is truncated.
     pub(crate) fn exhausted(&self) -> bool {
