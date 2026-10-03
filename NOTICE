@@ -1,0 +1,50 @@
+rivet-jpeg — a JPEG decoder and encoder
+Copyright 2026 Ely Erin Fox
+
+This product is licensed under the Open Encoding Attribution License,
+Version 1.0 (see LICENSE.md). It is source-available, not open source: the
+attribution duty in §5 applies to commercial use; §4 requires this NOTICE to
+be carried forward with any distribution.
+
+------------------------------------------------------------------------------
+Provenance
+------------------------------------------------------------------------------
+
+The decoder and encoder are original implementations written from ITU-T
+Recommendation T.81 | ISO/IEC 10918-1 (freely published by the ITU), ITU-T
+T.871 (JFIF), the EXIF specification (CIPA DC-008), the ICC specification
+(ICC.1, the embedding of profiles in JPEG) and Adobe's description of its
+APP14 colour-transform segment. They are not translations of, and do not
+derive from, any other JPEG implementation's source. The tables of T.81
+Annex K (quantisation and Huffman examples) and Table D.3 (the arithmetic
+coder's probability estimation) are reproduced from the Recommendation;
+docs/PROVENANCE.md records how.
+
+libjpeg-turbo was used only as a black box (a binary library, through the
+imagecodecs and Pillow Python packages, offline): to make some of the test
+files in tests/corpus/gen and to render references for them, and to decode
+this encoder's output for comparison. None of its code is included or was
+consulted.
+
+------------------------------------------------------------------------------
+Test data (tests/corpus; not part of the published crate)
+------------------------------------------------------------------------------
+
+testorig.jpg, testorig.ppm, testimgint.jpg and testimgari.jpg are test
+images of the Independent JPEG Group's software, used under the IJG
+licence: "this software is based in part on the work of the Independent
+JPEG Group".
+
+monkey12.jpg is from libjpeg-turbo's test images (BSD 3-Clause licence,
+Copyright the libjpeg-turbo Project); its embedded sRGB2014.icc profile is
+Copyright International Color Consortium, 2015, and may be copied and
+distributed without restriction.
+
+The dng-*.jpg files are extracted from raw.pixls.us sample files released
+under CC0 1.0 (public domain dedication).
+
+------------------------------------------------------------------------------
+Third-party components
+------------------------------------------------------------------------------
+
+thiserror (https://crates.io/crates/thiserror) — MIT OR Apache-2.0
