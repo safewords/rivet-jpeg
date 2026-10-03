@@ -143,17 +143,10 @@ impl EncodeTable {
     }
 }
 
-/// The optimal table for `freq` (counts by symbol 0–255), by the procedure of
-/// Annex K.2 (Figures K.1 to K.4): Huffman code sizes with one code point
-/// reserved so that no code is all 1-bits, limited to 16 bits.
-pub(crate) fn optimal_table(freq: &[u64; 256]) -> TableSpec {
-    let mut f = [0u64; 257];
-    f[..256].copy_from_slice(freq);
-    if f[..256].iter().all(|&x| x == 0) {
-        // A table must code something; give it one symbol.
-        f[0] = 1;
-    }
-    f[256] = 1;
+/// Figure K.1: Huffman code sizes for the counts `f` (index 256 is the
+/// reserved code point).
+fn code_sizes(f: &[u64; 257]) -> [u32; 257] {
+    let mut f = *f;
     let mut codesize = [0u32; 257];
     let mut others = [-1i32; 257];
     loop {
@@ -188,11 +181,39 @@ pub(crate) fn optimal_table(freq: &[u64; 256]) -> TableSpec {
             codesize[v2] += 1;
         }
     }
+    codesize
+}
+
+/// The optimal table for `freq` (counts by symbol 0–255), by the procedure of
+/// Annex K.2 (Figures K.1 to K.4): Huffman code sizes with one code point
+/// reserved so that no code is all 1-bits, limited to 16 bits.
+pub(crate) fn optimal_table(freq: &[u64; 256]) -> TableSpec {
+    let mut f = [0u64; 257];
+    f[..256].copy_from_slice(freq);
+    if f[..256].iter().all(|&x| x == 0) {
+        // A table must code something; give it one symbol.
+        f[0] = 1;
+    }
+    f[256] = 1;
+    // Figure K.1. K.2 assumes no code comes out longer than 32 bits; with
+    // counts skewed enough for that, halve them (keeping every used symbol)
+    // and build again.
+    let codesize = loop {
+        let c = code_sizes(&f);
+        if c.iter().all(|&l| l <= 32) {
+            break c;
+        }
+        for v in &mut f[..256] {
+            if *v > 0 {
+                *v = (*v).div_ceil(2);
+            }
+        }
+    };
     // Figure K.2.
     let mut bits = [0u32; 33];
     for &c in &codesize {
         if c > 0 {
-            bits[c.min(32) as usize] += 1;
+            bits[c as usize] += 1;
         }
     }
     // Figure K.3.

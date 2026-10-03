@@ -194,3 +194,70 @@ pub(crate) const QE_TABLE: [(u16, u8, u8, bool); 113] = [
     (0x5522, 112, 109, false), // 111
     (0x59EB, 112, 111, true), // 112
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::huffman::TableSpec;
+
+    /// Every code word Annex C generates from BITS and HUFFVAL is the one
+    /// T.81 lists in Tables K.3 to K.6.
+    #[test]
+    fn annex_k_huffman_tables_generate_the_listed_code_words() {
+        let listing = include_str!("../tests/data/annex_k_codewords.txt");
+        let tables = [
+            ("K3", TableSpec::new(&LUMA_DC_BITS, &LUMA_DC_VALUES)),
+            ("K4", TableSpec::new(&CHROMA_DC_BITS, &CHROMA_DC_VALUES)),
+            ("K5", TableSpec::new(&LUMA_AC_BITS, &LUMA_AC_VALUES)),
+            ("K6", TableSpec::new(&CHROMA_AC_BITS, &CHROMA_AC_VALUES)),
+        ];
+        let mut checked = 0;
+        for (name, spec) in &tables {
+            let (codes, all_ones) = spec.codes().unwrap();
+            assert!(!all_ones, "{name} uses an all-ones code");
+            let listed: Vec<(u8, &str)> = listing
+                .lines()
+                .filter(|l| l.starts_with(name))
+                .map(|l| {
+                    let mut f = l.split_whitespace().skip(1);
+                    (u8::from_str_radix(f.next().unwrap(), 16).unwrap(), f.next().unwrap())
+                })
+                .collect();
+            assert_eq!(listed.len(), spec.values.len(), "{name}");
+            for (sym, word) in listed {
+                let i = spec.values.iter().position(|&v| v == sym).unwrap();
+                let (len, code) = codes[i];
+                assert_eq!(format!("{code:0width$b}", width = usize::from(len)), word, "{name} symbol {sym:02X}");
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 12 + 12 + 162 + 162);
+    }
+
+    #[test]
+    fn zigzag_is_a_permutation_that_walks_the_antidiagonals() {
+        let mut seen = [false; 64];
+        for (k, &n) in ZIGZAG.iter().enumerate() {
+            assert!(!seen[n]);
+            seen[n] = true;
+            if k > 0 {
+                let (a, b) = (ZIGZAG[k - 1], n);
+                let (ra, ca, rb, cb) = (a / 8, a % 8, b / 8, b % 8);
+                assert!((ra + ca).abs_diff(rb + cb) <= 1);
+            }
+        }
+    }
+
+    /// Table D.3: the indices point inside the table, the switch is set
+    /// exactly where Qe is about one half of 0x8000 * 4/3 (the states that
+    /// start a new estimation chain), and the Qe values are 15-bit.
+    #[test]
+    fn qe_table_is_closed() {
+        for (i, &(qe, nlps, nmps, _)) in QE_TABLE.iter().enumerate() {
+            assert!(qe < 0x8000 && qe > 0, "{i}");
+            assert!(usize::from(nlps) < QE_TABLE.len() && usize::from(nmps) < QE_TABLE.len(), "{i}");
+        }
+        let switches: Vec<usize> = QE_TABLE.iter().enumerate().filter(|e| e.1.3).map(|e| e.0).collect();
+        assert_eq!(switches, vec![0, 14, 36, 64, 80, 88, 95, 105, 110, 112]);
+    }
+}
