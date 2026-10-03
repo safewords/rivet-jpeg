@@ -1,0 +1,24 @@
+[package]
+name = "rivet-jpeg"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license-file = "LICENSE.md"
+readme = "README.md"
+repository = "https://github.com/rivet-transcoder/rivet-jpeg"
+homepage = "https://github.com/rivet-transcoder/rivet-jpeg"
+documentation = "https://docs.rs/rivet-jpeg"
+authors = ["Ely Erin Fox"]
+description = "A JPEG decoder and encoder in Rust, written from ITU-T T.81 | ISO/IEC 10918-1, T.871 (JFIF) and the EXIF, Adobe and ICC conventions: no C, no system libraries, no build script. Baseline, extended (8- and 12-bit), progressive and lossless; Huffman and arithmetic coding; every sampling factor; CMYK and YCCK. rivet's still-image JPEG codec. Imported as `jpeg`."
+keywords = ["jpeg", "image", "decoder", "encoder", "codec"]
+categories = ["multimedia::images", "multimedia::encoding"]
+exclude = [".github/", "docs/", "tools/", "tests/corpus/"]
+
+[lib]
+name = "jpeg"
+
+[dependencies]
+thiserror = "2"
+
+[features]
+default = []
