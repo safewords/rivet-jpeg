@@ -1,6 +1,6 @@
 # rivet-jpeg
 
-[![CI](https://github.com/rivet-transcoder/rivet-jpeg/actions/workflows/ci.yml/badge.svg)](https://github.com/rivet-transcoder/rivet-jpeg/actions/workflows/ci.yml)
+[![CI](https://github.com/safewords/rivet-jpeg/actions/workflows/ci.yml/badge.svg)](https://github.com/safewords/rivet-jpeg/actions/workflows/ci.yml)
 
 A **JPEG** decoder and encoder in Rust: no C, no system libraries, no build
 script, nothing to install on a build host. Written from ITU-T T.81 |
@@ -11,7 +11,7 @@ arithmetic; the encoder writes baseline and progressive files that another
 decoder reads within a few levels of this one (the figures are
 [below](#how-it-is-checked)).
 
-Written for the **[rivet](https://github.com/rivet-transcoder/rivet)**
+Written for the **[rivet](https://github.com/safewords/rivet)**
 transcoder's still-image path, where it replaces the `image` crate's JPEG
 decoder and `jpeg-encoder`. Usable on its own by anything that has JPEG
 bytes and wants pixels, or pixels and wants JPEG.
@@ -21,7 +21,7 @@ dependency (`thiserror`), no features, no build script, no `unsafe`.
 
 ```toml
 [dependencies]
-jpeg = { package = "rivet-jpeg", git = "https://github.com/rivet-transcoder/rivet-jpeg", branch = "develop" }
+jpeg = { package = "rivet-jpeg", git = "https://github.com/safewords/rivet-jpeg", branch = "develop" }
 ```
 
 ## What it decodes
