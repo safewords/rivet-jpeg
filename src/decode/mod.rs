@@ -131,7 +131,7 @@ pub struct DecodeOptions {
 
 impl Default for DecodeOptions {
     fn default() -> Self {
-        Self { max_pixels: Some(1 << 30), strict: false }
+        Self { max_pixels: Some(1 << 28), strict: false }
     }
 }
 
@@ -181,7 +181,7 @@ pub fn read_info(data: &[u8]) -> Result<Info> {
     d.info()
 }
 
-/// Decode with the default options: lenient, at most 2^30 pixels.
+/// Decode with the default options: lenient, at most 2^28 pixels.
 pub fn decode(data: &[u8]) -> Result<Image> {
     decode_with(data, &DecodeOptions::default())
 }
@@ -421,6 +421,14 @@ impl<'a> Decoder<'a> {
                     return Err(Error::Truncated("the data ends before the first scan".into()));
                 }
                 if !self.seen_eoi {
+                    // Without EOI, a progressive picture may be missing
+                    // scans; a sequential one is whole if every component
+                    // has had its scan.
+                    let frame = self.frame.as_ref().ok_or_else(|| invalid("no frame"))?;
+                    let all_coded = self.progression.iter().all(|p| p[0] >= 0);
+                    if frame.progressive || !all_coded {
+                        self.complete = false;
+                    }
                     self.warn("the data ends without an EOI marker")?;
                 }
                 return Ok(());
@@ -774,6 +782,9 @@ impl<'a> Decoder<'a> {
             if !(1..=7).contains(&ss) {
                 return Err(invalid(format!("lossless predictor {ss}")));
             }
+            if al >= frame.precision {
+                return Err(invalid(format!("lossless point transform {al} at precision {}", frame.precision)));
+            }
         } else if frame.progressive {
             if ss > se || se > 63 || (ss == 0 && se != 0) || (ss > 0 && ns != 1) || ah > 13 || al > 13 {
                 return Err(invalid(format!("progressive scan Ss={ss} Se={se} Ah={ah} Al={al} with {ns} components")));
@@ -843,6 +854,10 @@ impl<'a> Decoder<'a> {
         }
         if frame.progressive {
             self.check_progression(scan)?;
+        } else {
+            for sc in &scan.comps {
+                self.progression[sc.ci][0] = 0;
+            }
         }
         if frame.lossless {
             lossless::decode(self, &frame, scan)
