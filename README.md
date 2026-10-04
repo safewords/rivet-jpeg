@@ -211,7 +211,9 @@ the number of threads (`tests/restart_threads.rs`).
 On the same machine, `cargo run --release --example bench` (4000x3000,
 4:2:0 q85 with grain, 4.5 MB, a restart every 64 MCUs), all threads:
 decode 67 ms before the intervals were parallel, 30 ms after; decode to
-RGB 74 ms, 35 ms.
+RGB 74 ms, 35 ms. The encoder codes such a scan in pieces of whole
+intervals the same way (each piece's markers kept in place when they are
+joined): 118 ms to encode it before, 36 ms after, the same bytes.
 
 ## Provenance and licensing
 

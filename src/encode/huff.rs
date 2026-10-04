@@ -51,6 +51,9 @@ struct RawWriter<'a> {
     n: u32,
     codes: &'a [[EncodeTable; 2]; 2],
     missing: bool,
+    /// The stretches before each restart marker the piece holds: their bits
+    /// (whole bytes, then `n` more in `acc`) and the marker's number.
+    before_restarts: Vec<(Vec<u8>, u64, u32, u8)>,
 }
 
 impl RawWriter<'_> {
@@ -91,8 +94,11 @@ impl Sink for RawWriter<'_> {
         let value = value & ((1u32 << n) - 1);
         self.put((u32::from(code) << n) | value, u32::from(len) + n);
     }
-    fn restart(&mut self, _: u8) {
-        unreachable!("pieces of a scan never hold a restart");
+    fn restart(&mut self, m: u8) {
+        // The bits so far end at the marker (padded there when appended).
+        self.before_restarts.push((std::mem::take(&mut self.out), self.acc, self.n, m));
+        self.acc = 0;
+        self.n = 0;
     }
     fn finish(&mut self) {}
 }
@@ -152,16 +158,22 @@ fn category(v: i32) -> (u32, u32) {
 /// threads.
 const PIECE_MCUS: usize = 1024;
 
-/// The pieces a scan is coded in: a sequential scan without restart
-/// intervals splits at MCU boundaries (its only state across blocks is the
-/// DC predictions, which the previous block gives); others are one piece.
+/// The pieces a scan is coded in: a sequential scan splits at MCU
+/// boundaries (its only state across blocks is the DC predictions, which
+/// the previous block gives), at restart interval boundaries when it has
+/// them (where the predictions start afresh); a progressive scan is one
+/// piece.
 fn pieces(comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec, progressive: bool) -> Vec<std::ops::Range<usize>> {
     let (mx, my) = geometry(comps, layout, scan);
     let total = mx * my;
-    if progressive || layout.restart > 0 || total <= PIECE_MCUS {
+    let step = match layout.restart {
+        0 => PIECE_MCUS,
+        ri => ri * (PIECE_MCUS / ri).max(1),
+    };
+    if progressive || total <= step {
         return std::iter::once(0..total).collect();
     }
-    (0..total.div_ceil(PIECE_MCUS)).map(|i| i * PIECE_MCUS..((i + 1) * PIECE_MCUS).min(total)).collect()
+    (0..total.div_ceil(step)).map(|i| i * step..((i + 1) * step).min(total)).collect()
 }
 
 /// The optimal tables for one scan: a counting pass over it (in pieces on
@@ -202,12 +214,17 @@ pub(super) fn encode_scan(
         w
     } else {
         let parts = crate::par::map(ranges.len(), layout.threads, |i| {
-            let mut r = RawWriter { out: Vec::new(), acc: 0, n: 0, codes: &codes, missing: false };
+            let mut r =
+                RawWriter { out: Vec::new(), acc: 0, n: 0, codes: &codes, missing: false, before_restarts: Vec::new() };
             run(&mut r, comps, layout, scan, progressive, ranges[i].clone());
-            (r.out, r.acc, r.n, r.missing)
+            (r.before_restarts, r.out, r.acc, r.n, r.missing)
         });
         let mut w = Writer { w: BitWriter::new(out), codes, missing: false };
-        for (bytes, acc, n, missing) in parts {
+        for (before_restarts, bytes, acc, n, missing) in parts {
+            for (bytes, acc, n, m) in before_restarts {
+                w.append(&bytes, acc, n);
+                w.restart(m);
+            }
             w.append(&bytes, acc, n);
             w.missing |= missing;
         }
@@ -256,7 +273,7 @@ fn geometry(comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec) -> (usize, us
 }
 
 /// Codes MCUs `mcus` of a scan into `s`. A range that does not start the
-/// scan (only sequential scans without restarts are split) takes its DC
+/// scan (only sequential scans are split) takes its DC
 /// predictions from the blocks just before it. Padding and the end of the
 /// scan are left to the caller.
 fn run<S: Sink>(s: &mut S, comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec, progressive: bool, mcus: std::ops::Range<usize>) {
@@ -272,7 +289,12 @@ fn run<S: Sink>(s: &mut S, comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec
             st.pred[ci] = i32::from(c.block(x * bh + bh - 1, y * bv + bv - 1)[0]);
         }
     }
-    let mut rst = 0u8;
+    // The number of the first marker this range writes: RSTn precedes
+    // interval n + 1, counting from 0 mod 8.
+    let mut rst = match layout.restart {
+        0 => 0,
+        ri => (mcus.start.saturating_sub(1) / ri % 8) as u8,
+    };
     for m in mcus {
         if layout.restart > 0 && m > 0 && m % layout.restart == 0 {
             st.emit_eobrun(s);
