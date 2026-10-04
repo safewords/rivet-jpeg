@@ -275,17 +275,24 @@ impl Image {
     /// components are (grey is replicated; CMYK and YCCK are converted
     /// naively). 12- and 16-bit samples are scaled to 8 bits.
     pub fn to_rgb8(&self) -> Vec<u8> {
-        self.to_8bit::<3>()
+        self.to_8bit::<3>(0)
+    }
+
+    /// [`Self::to_rgb8`] on at most `threads` threads, the calling thread
+    /// among them (0: the machine's available parallelism). The same bytes
+    /// whatever the count.
+    pub fn to_rgb8_with_threads(&self, threads: usize) -> Vec<u8> {
+        self.to_8bit::<3>(threads)
     }
 
     /// 8-bit RGB (`N` = 3) or RGBA with opaque alpha (`N` = 4), converted
     /// in bands of lines on several threads (each line's pixels depend only
     /// on the planes, so the result is the same).
-    fn to_8bit<const N: usize>(&self) -> Vec<u8> {
+    fn to_8bit<const N: usize>(&self, threads: usize) -> Vec<u8> {
         let (w, h) = (self.info.width as usize, self.info.height as usize);
         let mut out = vec![0u8; w * h * N];
         let scale = Scale::new(self.info.precision, 8);
-        crate::par::bands(&mut out, w * N, 0, |ys, band| {
+        crate::par::bands(&mut out, w * N, threads, |ys, band| {
             let start = ys.start;
             self.rgb_band(ys, |y, line| {
                 let o = &mut band[(y - start) * w * N..(y - start + 1) * w * N];
@@ -311,7 +318,12 @@ impl Image {
 
     /// 8-bit RGBA with opaque alpha, `width * height * 4` bytes.
     pub fn to_rgba8(&self) -> Vec<u8> {
-        self.to_8bit::<4>()
+        self.to_8bit::<4>(0)
+    }
+
+    /// [`Self::to_rgba8`] on at most `threads` threads (0: the machine's).
+    pub fn to_rgba8_with_threads(&self, threads: usize) -> Vec<u8> {
+        self.to_8bit::<4>(threads)
     }
 
     /// 16-bit RGB, `width * height * 3` values scaled to the full 0–65535

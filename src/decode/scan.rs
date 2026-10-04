@@ -92,6 +92,22 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
     let start = dec.pos;
     let strict = dec.opts.strict;
     let ri = usize::from(dec.restart_interval);
+    let total = geo.mcus_x * geo.mcus_y;
+    // Restart intervals of a sequential Huffman scan are independent: each
+    // starts with fresh predictions at a marker found by its number. Decode
+    // them side by side when there are several and the scan is big enough.
+    if !frame.arithmetic && !frame.progressive && ri > 0 && total > ri {
+        let threads = crate::par::threads(dec.opts.threads);
+        let per_mcu: usize =
+            if single { 1 } else { scan.comps.iter().map(|c| frame.comps[c.ci].h * frame.comps[c.ci].v).sum() };
+        if threads > 1
+            && total * per_mcu >= PARALLEL_MIN_BLOCKS
+            && let Some(pos) = intervals_in_parallel(data, start, &dec.tables, frame, scan, &geo, ri, threads, &mut dec.coefs)
+        {
+            dec.pos = pos;
+            return Ok(ScanEnd::Complete);
+        }
+    }
     let Decoder { tables, coefs, warnings, .. } = dec;
     let tables: &Tables = tables;
     let mut ent = if frame.arithmetic {
@@ -119,7 +135,6 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
         }
         Ok(())
     };
-    let total = geo.mcus_x * geo.mcus_y;
     let mut next_rst = 0u8;
     let mut block = [0i16; 64];
     let mut m = 0usize;
@@ -245,6 +260,128 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
     };
     dec.pos = pos;
     Ok(end)
+}
+
+/// Below this many blocks a scan's restart intervals are decoded on the
+/// calling thread: the threads would cost more than they save.
+const PARALLEL_MIN_BLOCKS: usize = 4096;
+
+/// The next marker at or after `p`: its code and the position after it.
+/// Stuffed bytes (0xFF 0x00) are data, and fill bytes (0xFF 0xFF ...) part
+/// of the marker that follows.
+fn next_marker(data: &[u8], mut p: usize) -> Option<(u8, usize)> {
+    loop {
+        p += data.get(p..)?.iter().position(|&b| b == 0xFF)?;
+        let mut q = p + 1;
+        while data.get(q) == Some(&0xFF) {
+            q += 1;
+        }
+        let m = *data.get(q)?;
+        if m != 0 {
+            return Some((m, q + 1));
+        }
+        p = q + 1;
+    }
+}
+
+/// A sequential Huffman scan with restart intervals, each interval decoded
+/// on its own on up to `threads` threads, into `coefs` exactly as the
+/// serial loop in [`decode`] would put them, returning where the scan ends.
+///
+/// Only a scan the serial loop would decode without a word to say is done
+/// here: every restart marker present, in sequence, with nothing between
+/// an interval's last bits and its marker, no Huffman code that matches
+/// nothing, no interval running out of data, the scan padded with 1-bits.
+/// Anything else — the cases where the serial loop warns, skips intervals
+/// or stops short — is `None`, `coefs` untouched, and the scan is decoded
+/// serially, so the picture and the warnings are the same either way.
+#[allow(clippy::too_many_arguments)]
+fn intervals_in_parallel(
+    data: &[u8],
+    start: usize,
+    tables: &Tables,
+    frame: &Frame,
+    scan: &Scan,
+    geo: &Geometry,
+    ri: usize,
+    threads: usize,
+    coefs: &mut [Vec<i16>],
+) -> Option<usize> {
+    let total = geo.mcus_x * geo.mcus_y;
+    let n = total.div_ceil(ri);
+    // Where each interval's data starts: after RST0, RST1, ... in turn.
+    let mut starts = Vec::with_capacity(n);
+    starts.push(start);
+    for k in 0..n - 1 {
+        let (m, after) = next_marker(data, starts[k])?;
+        if m != 0xD0 + (k % 8) as u8 {
+            return None;
+        }
+        starts.push(after);
+    }
+    // Blocks per MCU, per scan component.
+    let units: Vec<(usize, usize)> = scan
+        .comps
+        .iter()
+        .map(|sc| if geo.single { (1, 1) } else { (frame.comps[sc.ci].h, frame.comps[sc.ci].v) })
+        .collect();
+    let per_mcu: usize = units.iter().map(|&(h, v)| h * v).sum();
+    let dc: Vec<Option<&DecodeTable>> = scan.comps.iter().map(|c| tables.dc[c.td].as_ref()).collect();
+    let ac: Vec<Option<&DecodeTable>> = scan.comps.iter().map(|c| tables.ac[c.ta].as_ref()).collect();
+    let decoded = crate::par::map(n, threads, |k| -> Option<(Vec<i16>, usize)> {
+        let mut h = HuffState { r: BitReader::new(data, starts[k]), dc: dc.clone(), ac: ac.clone(), eobrun: 0 };
+        let mut pred = vec![0i32; units.len()];
+        let mcus = k * ri..((k + 1) * ri).min(total);
+        let mut out = vec![0i16; mcus.len() * per_mcu * 64];
+        let mut blocks = out.as_chunks_mut::<64>().0.iter_mut();
+        for _ in mcus {
+            for (si, &(bh, bv)) in units.iter().enumerate() {
+                for _ in 0..bh * bv {
+                    let blk = blocks.next().expect("sized for the interval");
+                    huff_sequential(&mut h, si, &mut pred[si], blk).ok()?;
+                }
+            }
+            if h.r.overrun() && !matches!(h.r.marker(), Some(0xD0..=0xD7)) {
+                return None;
+            }
+        }
+        let (bits, nb) = h.r.leftover();
+        if nb >= 8 || bits != (1 << nb) - 1 {
+            return None;
+        }
+        if k + 1 < n {
+            match find_restart(data, h.r.pos(), (k % 8) as u8) {
+                (Restart::Found { pos }, true) if pos == starts[k + 1] => Some((out, 0)),
+                _ => None,
+            }
+        } else if h.r.overrun() {
+            None
+        } else {
+            Some((out, h.r.pos()))
+        }
+    });
+    let mut end = 0;
+    let mut m = 0usize;
+    for interval in &decoded {
+        let (out, pos) = interval.as_ref()?;
+        end = *pos;
+        let mut blocks = out.as_chunks::<64>().0.iter();
+        for _ in 0..out.len() / (per_mcu * 64) {
+            let (mx, my) = (m % geo.mcus_x, m / geo.mcus_x);
+            for (sc, &(bh, bv)) in scan.comps.iter().zip(&units) {
+                let fc = &frame.comps[sc.ci];
+                for v in 0..bv {
+                    for hh in 0..bh {
+                        let (bx, by) = (mx * bh + hh, my * bv + v);
+                        let at = (by * fc.blocks_stride + bx) * 64;
+                        coefs[sc.ci][at..at + 64].copy_from_slice(blocks.next().expect("one per block"));
+                    }
+                }
+            }
+            m += 1;
+        }
+    }
+    Some(end)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -583,6 +720,7 @@ impl ArithState<'_> {
 pub(super) fn idct_all(dec: &mut Decoder<'_>, frame: &Frame) {
     let level = 1i32 << (frame.precision - 1);
     let max = (1i32 << frame.precision) - 1;
+    let threads = dec.opts.threads;
     for (ci, fc) in frame.comps.iter().enumerate() {
         let q = dec.comp_quant[ci].unwrap_or([1; 64]);
         let coefs = std::mem::take(&mut dec.coefs[ci]);
@@ -591,7 +729,7 @@ pub(super) fn idct_all(dec: &mut Decoder<'_>, frame: &Frame) {
             if frame.progressive { (fc.units_w, fc.units_h) } else { (fc.blocks_stride, fc.rows / 8) };
         let rows = 8 * fc.stride;
         let used = (units_h * rows).min(plane.len());
-        crate::par::bands(&mut plane[..used], rows, 0, |bys, band| {
+        crate::par::bands(&mut plane[..used], rows, threads, |bys, band| {
             for (i, by) in bys.enumerate() {
                 for bx in 0..units_w {
                     let at = (by * fc.blocks_stride + bx) * 64;

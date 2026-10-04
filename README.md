@@ -198,7 +198,20 @@ the output is identical to the last bit on any processor. The decoder
 transforms all blocks after the entropy-coded data, in rows on several
 threads, and converts to RGB in bands of lines; the encoder prepares rows
 of MCUs, codes a sequential scan in pieces and a progression's scans on
-several threads. Results do not depend on the number of threads.
+several threads. A sequential Huffman scan with restart intervals has its
+intervals entropy-decoded side by side (each starts afresh at a marker
+found by its number); a scan whose restart structure is in any way off —
+a marker missing or misnumbered, data before one, an interval that breaks
+or runs short — is decoded by the serial loop instead, so its warnings are
+the same. `DecodeOptions::threads` and `EncodeSettings::threads` bound the
+threads (0: the machine's; 1: the calling thread alone), and
+`Image::to_rgb8_with_threads` the conversion's. Results do not depend on
+the number of threads (`tests/restart_threads.rs`).
+
+On the same machine, `cargo run --release --example bench` (4000x3000,
+4:2:0 q85 with grain, 4.5 MB, a restart every 64 MCUs), all threads:
+decode 67 ms before the intervals were parallel, 30 ms after; decode to
+RGB 74 ms, 35 ms.
 
 ## Provenance and licensing
 

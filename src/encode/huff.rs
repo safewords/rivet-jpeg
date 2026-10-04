@@ -168,7 +168,7 @@ fn pieces(comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec, progressive: bo
 /// several threads where the scan allows, the counts summed).
 pub(super) fn optimal_tables(comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec, progressive: bool) -> Tables {
     let ranges = pieces(comps, layout, scan, progressive);
-    let counts = crate::par::map(ranges.len(), 0, |i| {
+    let counts = crate::par::map(ranges.len(), layout.threads, |i| {
         let mut c = Counter { freq: [[[0; 256]; 2]; 2] };
         run(&mut c, comps, layout, scan, progressive, ranges[i].clone());
         c.freq
@@ -201,7 +201,7 @@ pub(super) fn encode_scan(
         run(&mut w, comps, layout, scan, progressive, ranges[0].clone());
         w
     } else {
-        let parts = crate::par::map(ranges.len(), 0, |i| {
+        let parts = crate::par::map(ranges.len(), layout.threads, |i| {
             let mut r = RawWriter { out: Vec::new(), acc: 0, n: 0, codes: &codes, missing: false };
             run(&mut r, comps, layout, scan, progressive, ranges[i].clone());
             (r.out, r.acc, r.n, r.missing)

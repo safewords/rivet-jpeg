@@ -88,6 +88,10 @@ pub struct EncodeSettings {
     /// Huffman. Valid T.81, but many decoders do not implement it; for
     /// testing decoders, not for publishing.
     pub arithmetic: bool,
+    /// The most threads to encode on, the calling thread among them (0: the
+    /// machine's available parallelism; 1: the calling thread alone). The
+    /// bytes are the same whatever the count.
+    pub threads: usize,
 }
 
 impl Default for EncodeSettings {
@@ -102,6 +106,7 @@ impl Default for EncodeSettings {
             icc_profile: None,
             exif: None,
             arithmetic: false,
+            threads: 0,
         }
     }
 }
@@ -150,6 +155,8 @@ pub(crate) struct Layout {
     pub(crate) mcus_x: usize,
     pub(crate) mcus_y: usize,
     pub(crate) restart: usize,
+    /// [`EncodeSettings::threads`].
+    pub(crate) threads: usize,
 }
 
 /// Encode `pixels` (`width * height` of `format`, row by row) as a JPEG
@@ -183,8 +190,8 @@ pub fn encode(pixels: &[u8], width: u32, height: u32, format: PixelFormat, setti
     let mcus_x = w.div_ceil(8 * hy);
     let mcus_y = h.div_ceil(8 * vy);
     let qtables = [scaled_table(&LUMA_QUANT, settings.quality), scaled_table(&CHROMA_QUANT, settings.quality)];
-    let comps = prepare(pixels, w, h, format, hy, vy, mcus_x, mcus_y, &qtables);
-    let layout = Layout { mcus_x, mcus_y, restart: usize::from(settings.restart_interval) };
+    let comps = prepare(pixels, w, h, format, hy, vy, mcus_x, mcus_y, &qtables, settings.threads);
+    let layout = Layout { mcus_x, mcus_y, restart: usize::from(settings.restart_interval), threads: settings.threads };
 
     let mut out = Vec::with_capacity(w * h / 4 + 1024);
     out.extend_from_slice(&[0xFF, 0xD8]);
@@ -239,7 +246,7 @@ pub fn encode(pixels: &[u8], width: u32, height: u32, format: PixelFormat, setti
     };
     // Each scan depends only on the coefficients, so a progression's scans
     // are coded on several threads and joined in order.
-    let coded = crate::par::map(scans.len(), 0, |i| -> Result<Vec<u8>> {
+    let coded = crate::par::map(scans.len(), settings.threads, |i| -> Result<Vec<u8>> {
         let scan = &scans[i];
         let mut out = Vec::new();
         if settings.arithmetic {
@@ -362,9 +369,10 @@ fn prepare(
     mcus_x: usize,
     mcus_y: usize,
     qtables: &[[u16; 64]; 2],
+    threads: usize,
 ) -> Vec<CompCoefs> {
     let ncomp = if format == PixelFormat::Luma { 1 } else { 3 };
-    let rows = crate::par::map(mcus_y, 0, |r| {
+    let rows = crate::par::map(mcus_y, threads, |r| {
         crate::simd::with_wide_vectors(|| prepare_mcu_row(pixels, w, h, format, hy, vy, mcus_x, r, qtables))
     });
     let mut out = Vec::with_capacity(ncomp);

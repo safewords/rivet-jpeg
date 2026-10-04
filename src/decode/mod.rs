@@ -127,11 +127,15 @@ pub struct DecodeOptions {
     /// rules of G.1.1.1, a missing EOI, bytes after EOI. Off by default; the
     /// tests turn it on to check this crate's encoder.
     pub strict: bool,
+    /// The most threads to decode on, the calling thread among them (0: the
+    /// machine's available parallelism; 1: the calling thread alone). The
+    /// picture is the same whatever the count.
+    pub threads: usize,
 }
 
 impl Default for DecodeOptions {
     fn default() -> Self {
-        Self { max_pixels: Some(1 << 28), strict: false }
+        Self { max_pixels: Some(1 << 28), strict: false, threads: 0 }
     }
 }
 
@@ -176,7 +180,7 @@ pub struct Image {
 
 /// The headers only: everything up to the first scan, without decoding.
 pub fn read_info(data: &[u8]) -> Result<Info> {
-    let mut d = Decoder::new(data, DecodeOptions { max_pixels: None, strict: false });
+    let mut d = Decoder::new(data, DecodeOptions { max_pixels: None, strict: false, threads: 1 });
     d.run(true)?;
     d.info()
 }
