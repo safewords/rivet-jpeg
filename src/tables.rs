@@ -12,9 +12,9 @@
 /// `ZIGZAG[k]` is the natural (row-major) index of the coefficient at
 /// zig-zag position `k` (Figure A.6).
 pub(crate) const ZIGZAG: [usize; 64] = [
-    0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21,
-    28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61,
-    54, 47, 55, 62, 63,
+    0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20,
+    13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59,
+    52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
 ];
 
 /// Table K.1, the example luminance quantisation table, in natural order.
@@ -52,6 +52,7 @@ pub(crate) const CHROMA_DC_VALUES: [u8; 12] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
 /// Table K.5: luminance AC coefficients.
 pub(crate) const LUMA_AC_BITS: [u8; 16] = [0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 125];
 /// Table K.5: HUFFVAL.
+#[rustfmt::skip]
 pub(crate) const LUMA_AC_VALUES: [u8; 162] = [
     0x01, 0x02, 0x03, 0x00, 0x04, 0x11, 0x05, 0x12, 0x21, 0x31, 0x41, 0x06, 0x13, 0x51, 0x61, 0x07, 0x22, 0x71, 0x14,
     0x32, 0x81, 0x91, 0xa1, 0x08, 0x23, 0x42, 0xb1, 0xc1, 0x15, 0x52, 0xd1, 0xf0, 0x24, 0x33, 0x62, 0x72, 0x82, 0x09,
@@ -66,6 +67,7 @@ pub(crate) const LUMA_AC_VALUES: [u8; 162] = [
 /// Table K.6: chrominance AC coefficients.
 pub(crate) const CHROMA_AC_BITS: [u8; 16] = [0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 119];
 /// Table K.6: HUFFVAL.
+#[rustfmt::skip]
 pub(crate) const CHROMA_AC_VALUES: [u8; 162] = [
     0x00, 0x01, 0x02, 0x03, 0x11, 0x04, 0x05, 0x21, 0x31, 0x06, 0x12, 0x41, 0x51, 0x07, 0x61, 0x71, 0x13, 0x22, 0x32,
     0x81, 0x08, 0x14, 0x42, 0x91, 0xa1, 0xb1, 0xc1, 0x09, 0x23, 0x33, 0x52, 0xf0, 0x15, 0x62, 0x72, 0xd1, 0x0a, 0x16,
@@ -79,6 +81,7 @@ pub(crate) const CHROMA_AC_VALUES: [u8; 162] = [
 ];
 
 /// Table D.3: (Qe_Value, Next_Index_LPS, Next_Index_MPS, Switch_MPS), by index.
+#[rustfmt::skip]
 pub(crate) const QE_TABLE: [(u16, u8, u8, bool); 113] = [
     (0x5A1D, 1, 1, true), // 0
     (0x2586, 14, 2, false), // 1
@@ -220,14 +223,21 @@ mod tests {
                 .filter(|l| l.starts_with(name))
                 .map(|l| {
                     let mut f = l.split_whitespace().skip(1);
-                    (u8::from_str_radix(f.next().unwrap(), 16).unwrap(), f.next().unwrap())
+                    (
+                        u8::from_str_radix(f.next().unwrap(), 16).unwrap(),
+                        f.next().unwrap(),
+                    )
                 })
                 .collect();
             assert_eq!(listed.len(), spec.values.len(), "{name}");
             for (sym, word) in listed {
                 let i = spec.values.iter().position(|&v| v == sym).unwrap();
                 let (len, code) = codes[i];
-                assert_eq!(format!("{code:0width$b}", width = usize::from(len)), word, "{name} symbol {sym:02X}");
+                assert_eq!(
+                    format!("{code:0width$b}", width = usize::from(len)),
+                    word,
+                    "{name} symbol {sym:02X}"
+                );
                 checked += 1;
             }
         }
@@ -255,9 +265,17 @@ mod tests {
     fn qe_table_is_closed() {
         for (i, &(qe, nlps, nmps, _)) in QE_TABLE.iter().enumerate() {
             assert!(qe < 0x8000 && qe > 0, "{i}");
-            assert!(usize::from(nlps) < QE_TABLE.len() && usize::from(nmps) < QE_TABLE.len(), "{i}");
+            assert!(
+                usize::from(nlps) < QE_TABLE.len() && usize::from(nmps) < QE_TABLE.len(),
+                "{i}"
+            );
         }
-        let switches: Vec<usize> = QE_TABLE.iter().enumerate().filter(|e| e.1.3).map(|e| e.0).collect();
+        let switches: Vec<usize> = QE_TABLE
+            .iter()
+            .enumerate()
+            .filter(|e| e.1.3)
+            .map(|e| e.0)
+            .collect();
         assert_eq!(switches, vec![0, 14, 36, 64, 80, 88, 95, 105, 110, 112]);
     }
 }

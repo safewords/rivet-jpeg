@@ -9,7 +9,11 @@ use jpeg::{EncodeSettings, PixelFormat, Subsampling};
 /// (to 224x144): the picture is itself a decoded JPEG, and re-encoding it
 /// on its own block grid would nearly reproduce it at its own quality.
 fn photo() -> (Vec<u8>, u32, u32) {
-    let ppm = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/corpus/ijg-testorig.ppm")).unwrap();
+    let ppm = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/corpus/ijg-testorig.ppm"
+    ))
+    .unwrap();
     let full = &ppm[ppm.len() - 227 * 149 * 3..];
     let mut out = Vec::with_capacity(224 * 144 * 3);
     for y in 5..149 {
@@ -21,14 +25,28 @@ fn photo() -> (Vec<u8>, u32, u32) {
 #[test]
 fn quality_sweep() {
     let (rgb, w, h) = photo();
-    println!("{:<8} {:>4} {:>12} {:>12} {:>12} {:>9}", "chroma", "q", "baseline", "optimised", "progressive", "PSNR dB");
+    println!(
+        "{:<8} {:>4} {:>12} {:>12} {:>12} {:>9}",
+        "chroma", "q", "baseline", "optimised", "progressive", "PSNR dB"
+    );
     for sub in [Subsampling::S444, Subsampling::S420] {
         let mut last_psnr = 0.0;
         let mut last_size = 0;
         for q in [5u8, 10, 25, 50, 75, 85, 90, 95, 100] {
-            let plain = EncodeSettings { quality: q, subsampling: sub, optimize_huffman: false, ..Default::default() };
-            let opt = EncodeSettings { optimize_huffman: true, ..plain.clone() };
-            let prog = EncodeSettings { progressive: true, ..plain.clone() };
+            let plain = EncodeSettings {
+                quality: q,
+                subsampling: sub,
+                optimize_huffman: false,
+                ..Default::default()
+            };
+            let opt = EncodeSettings {
+                optimize_huffman: true,
+                ..plain.clone()
+            };
+            let prog = EncodeSettings {
+                progressive: true,
+                ..plain.clone()
+            };
             let fa = jpeg::encode(&rgb, w, h, PixelFormat::Rgb, &plain).unwrap();
             let fb = jpeg::encode(&rgb, w, h, PixelFormat::Rgb, &opt).unwrap();
             let fc = jpeg::encode(&rgb, w, h, PixelFormat::Rgb, &prog).unwrap();
@@ -36,7 +54,13 @@ fn quality_sweep() {
             assert_eq!(common::strict(&fb).to_rgb8(), pa);
             assert_eq!(common::strict(&fc).to_rgb8(), pa);
             let psnr = common::psnr(&rgb, &pa);
-            println!("{:<8} {q:>4} {:>12} {:>12} {:>12} {psnr:>9.2}", format!("{sub:?}"), fa.len(), fb.len(), fc.len());
+            println!(
+                "{:<8} {q:>4} {:>12} {:>12} {:>12} {psnr:>9.2}",
+                format!("{sub:?}"),
+                fa.len(),
+                fb.len(),
+                fc.len()
+            );
             assert!(psnr > last_psnr, "PSNR rises with quality");
             assert!(fa.len() > last_size, "size rises with quality");
             assert!(fb.len() <= fa.len(), "optimised tables are never larger");
@@ -50,14 +74,26 @@ fn quality_sweep() {
 #[test]
 fn grey_and_rgba() {
     let (rgb, w, h) = photo();
-    let grey: Vec<u8> = rgb.chunks(3).map(|p| ((u32::from(p[0]) * 299 + u32::from(p[1]) * 587 + u32::from(p[2]) * 114) / 1000) as u8).collect();
+    let grey: Vec<u8> = rgb
+        .chunks(3)
+        .map(|p| {
+            ((u32::from(p[0]) * 299 + u32::from(p[1]) * 587 + u32::from(p[2]) * 114) / 1000) as u8
+        })
+        .collect();
     for progressive in [false, true] {
-        let s = EncodeSettings { quality: 90, progressive, ..Default::default() };
+        let s = EncodeSettings {
+            quality: 90,
+            progressive,
+            ..Default::default()
+        };
         let f = jpeg::encode(&grey, w, h, PixelFormat::Luma, &s).unwrap();
         let img = common::strict(&f);
         assert_eq!(img.info.colour_space, jpeg::ColourSpace::Grey);
         let p = common::psnr(&grey, &img.to_luma8());
-        println!("grey progressive={progressive}: {} bytes, {p:.2} dB", f.len());
+        println!(
+            "grey progressive={progressive}: {} bytes, {p:.2} dB",
+            f.len()
+        );
         assert!(p > 38.0);
     }
     let rgba: Vec<u8> = rgb.chunks(3).flat_map(|p| [p[0], p[1], p[2], 7]).collect();
@@ -93,27 +129,77 @@ fn metadata_round_trips() {
         assert_eq!(info.icc_profile, img.info.icc_profile);
     }
     // Without the prefix, the same file.
-    let a = jpeg::encode(&rgb, w, h, PixelFormat::Rgb, &EncodeSettings { exif: Some(tiff.clone()), ..Default::default() }).unwrap();
+    let a = jpeg::encode(
+        &rgb,
+        w,
+        h,
+        PixelFormat::Rgb,
+        &EncodeSettings {
+            exif: Some(tiff.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
     let b = jpeg::encode(
         &rgb,
         w,
         h,
         PixelFormat::Rgb,
-        &EncodeSettings { exif: Some([b"Exif\0\0".as_slice(), &tiff].concat()), ..Default::default() },
+        &EncodeSettings {
+            exif: Some([b"Exif\0\0".as_slice(), &tiff].concat()),
+            ..Default::default()
+        },
     )
     .unwrap();
     assert_eq!(a, b);
-    let none = jpeg::encode(&rgb, w, h, PixelFormat::Rgb, &EncodeSettings { jfif: false, ..Default::default() }).unwrap();
+    let none = jpeg::encode(
+        &rgb,
+        w,
+        h,
+        PixelFormat::Rgb,
+        &EncodeSettings {
+            jfif: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     assert!(common::strict(&none).info.jfif.is_none());
 }
 
 #[test]
 fn every_small_size() {
-    for (w, h) in [(1, 1), (1, 17), (17, 1), (8, 8), (9, 9), (15, 16), (16, 15), (33, 7), (300, 2)] {
+    for (w, h) in [
+        (1, 1),
+        (1, 17),
+        (17, 1),
+        (8, 8),
+        (9, 9),
+        (15, 16),
+        (16, 15),
+        (33, 7),
+        (300, 2),
+    ] {
         let rgb = common::picture(w, h);
-        for sub in [Subsampling::S444, Subsampling::S422, Subsampling::S420, Subsampling::S440] {
-            for (progressive, arithmetic, ri) in [(false, false, 0u16), (true, false, 1), (false, true, 2), (true, true, 0)] {
-                let s = EncodeSettings { quality: 95, subsampling: sub, progressive, arithmetic, restart_interval: ri, ..Default::default() };
+        for sub in [
+            Subsampling::S444,
+            Subsampling::S422,
+            Subsampling::S420,
+            Subsampling::S440,
+        ] {
+            for (progressive, arithmetic, ri) in [
+                (false, false, 0u16),
+                (true, false, 1),
+                (false, true, 2),
+                (true, true, 0),
+            ] {
+                let s = EncodeSettings {
+                    quality: 95,
+                    subsampling: sub,
+                    progressive,
+                    arithmetic,
+                    restart_interval: ri,
+                    ..Default::default()
+                };
                 let f = jpeg::encode(&rgb, w as u32, h as u32, PixelFormat::Rgb, &s).unwrap();
                 let img = common::strict(&f);
                 assert_eq!((img.info.width, img.info.height), (w as u32, h as u32));
@@ -127,12 +213,19 @@ fn every_small_size() {
 fn restart_intervals_appear_where_asked() {
     let (rgb, w, h) = photo();
     for ri in [1u16, 2, 7, 100] {
-        let s = EncodeSettings { restart_interval: ri, subsampling: Subsampling::S420, ..Default::default() };
+        let s = EncodeSettings {
+            restart_interval: ri,
+            subsampling: Subsampling::S420,
+            ..Default::default()
+        };
         let f = jpeg::encode(&rgb, w, h, PixelFormat::Rgb, &s).unwrap();
         let img = common::strict(&f);
         assert_eq!(img.info.restart_interval, ri);
         let mcus = (w as usize).div_ceil(16) * (h as usize).div_ceil(16);
-        let markers = f.windows(2).filter(|p| p[0] == 0xFF && (0xD0..=0xD7).contains(&p[1])).count();
+        let markers = f
+            .windows(2)
+            .filter(|p| p[0] == 0xFF && (0xD0..=0xD7).contains(&p[1]))
+            .count();
         assert_eq!(markers, (mcus - 1) / usize::from(ri), "interval {ri}");
     }
 }
@@ -141,11 +234,32 @@ fn restart_intervals_appear_where_asked() {
 fn settings_are_checked() {
     let rgb = vec![0u8; 12];
     let s = EncodeSettings::default();
-    assert!(matches!(jpeg::encode(&rgb, 0, 4, PixelFormat::Rgb, &s), Err(jpeg::Error::Config(_))));
-    assert!(matches!(jpeg::encode(&rgb, 2, 3, PixelFormat::Rgb, &s), Err(jpeg::Error::Config(_))));
-    assert!(matches!(jpeg::encode(&rgb, 70000, 1, PixelFormat::Rgb, &s), Err(jpeg::Error::Config(_))));
-    let q0 = EncodeSettings { quality: 0, ..Default::default() };
-    assert!(matches!(jpeg::encode(&rgb, 2, 2, PixelFormat::Rgb, &q0), Err(jpeg::Error::Config(_))));
-    let big = EncodeSettings { exif: Some(vec![0; 70_000]), ..Default::default() };
-    assert!(matches!(jpeg::encode(&rgb, 2, 2, PixelFormat::Rgb, &big), Err(jpeg::Error::Config(_))));
+    assert!(matches!(
+        jpeg::encode(&rgb, 0, 4, PixelFormat::Rgb, &s),
+        Err(jpeg::Error::Config(_))
+    ));
+    assert!(matches!(
+        jpeg::encode(&rgb, 2, 3, PixelFormat::Rgb, &s),
+        Err(jpeg::Error::Config(_))
+    ));
+    assert!(matches!(
+        jpeg::encode(&rgb, 70000, 1, PixelFormat::Rgb, &s),
+        Err(jpeg::Error::Config(_))
+    ));
+    let q0 = EncodeSettings {
+        quality: 0,
+        ..Default::default()
+    };
+    assert!(matches!(
+        jpeg::encode(&rgb, 2, 2, PixelFormat::Rgb, &q0),
+        Err(jpeg::Error::Config(_))
+    ));
+    let big = EncodeSettings {
+        exif: Some(vec![0; 70_000]),
+        ..Default::default()
+    };
+    assert!(matches!(
+        jpeg::encode(&rgb, 2, 2, PixelFormat::Rgb, &big),
+        Err(jpeg::Error::Config(_))
+    ));
 }

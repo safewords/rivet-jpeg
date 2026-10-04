@@ -22,11 +22,21 @@ fn main() {
     }
     let (w, h): (u32, u32) = (fields[1].parse().unwrap(), fields[2].parse().unwrap());
     let rgb = &ppm[i + 1..i + 1 + (w * h * 3) as usize];
-    let grey: Vec<u8> = rgb.chunks(3).map(|p| ((u32::from(p[0]) * 299 + u32::from(p[1]) * 587 + u32::from(p[2]) * 114) / 1000) as u8).collect();
+    let grey: Vec<u8> = rgb
+        .chunks(3)
+        .map(|p| {
+            ((u32::from(p[0]) * 299 + u32::from(p[1]) * 587 + u32::from(p[2]) * 114) / 1000) as u8
+        })
+        .collect();
     let out = std::path::Path::new(&a[2]);
     std::fs::create_dir_all(out).unwrap();
     let icc: Vec<u8> = (0..100_000u32).map(|i| (i % 253) as u8).collect();
-    let subs = [("444", Subsampling::S444), ("422", Subsampling::S422), ("420", Subsampling::S420), ("440", Subsampling::S440)];
+    let subs = [
+        ("444", Subsampling::S444),
+        ("422", Subsampling::S422),
+        ("420", Subsampling::S420),
+        ("440", Subsampling::S440),
+    ];
     for (sn, sub) in subs {
         for (mode, progressive, arithmetic, optimise) in [
             ("baseline-std", false, false, false),
@@ -50,16 +60,35 @@ fn main() {
                     let f = jpeg::encode(rgb, w, h, PixelFormat::Rgb, &s).unwrap();
                     let name = format!("{mode}-{sn}-q{q}-ri{ri}");
                     std::fs::write(out.join(format!("{name}.jpg")), &f).unwrap();
-                    std::fs::write(out.join(format!("{name}.rgb")), jpeg::decode(&f).unwrap().to_rgb8()).unwrap();
+                    std::fs::write(
+                        out.join(format!("{name}.rgb")),
+                        jpeg::decode(&f).unwrap().to_rgb8(),
+                    )
+                    .unwrap();
                 }
             }
         }
     }
     for progressive in [false, true] {
-        let s = EncodeSettings { quality: 85, progressive, ..Default::default() };
+        let s = EncodeSettings {
+            quality: 85,
+            progressive,
+            ..Default::default()
+        };
         let f = jpeg::encode(&grey, w, h, PixelFormat::Luma, &s).unwrap();
-        let name = format!("grey-{}", if progressive { "progressive" } else { "baseline" });
+        let name = format!(
+            "grey-{}",
+            if progressive {
+                "progressive"
+            } else {
+                "baseline"
+            }
+        );
         std::fs::write(out.join(format!("{name}.jpg")), &f).unwrap();
-        std::fs::write(out.join(format!("{name}.rgb")), jpeg::decode(&f).unwrap().to_rgb8()).unwrap();
+        std::fs::write(
+            out.join(format!("{name}.rgb")),
+            jpeg::decode(&f).unwrap().to_rgb8(),
+        )
+        .unwrap();
     }
 }

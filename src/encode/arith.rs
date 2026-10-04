@@ -13,8 +13,16 @@ struct Coder<'a> {
     da: Vec<i32>,
 }
 
-pub(super) fn encode_scan(out: &mut Vec<u8>, comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec, progressive: bool) {
-    let members: Vec<usize> = (0..comps.len()).filter(|i| scan.comps & (1 << i) != 0).collect();
+pub(super) fn encode_scan(
+    out: &mut Vec<u8>,
+    comps: &[CompCoefs],
+    layout: &Layout,
+    scan: &ScanSpec,
+    progressive: bool,
+) {
+    let members: Vec<usize> = (0..comps.len())
+        .filter(|i| scan.comps & (1 << i) != 0)
+        .collect();
     let single = members.len() == 1;
     let (mx, my) = if single {
         let c = &comps[members[0]];
@@ -27,7 +35,11 @@ pub(super) fn encode_scan(out: &mut Vec<u8>, comps: &[CompCoefs], layout: &Layou
     let mut segment = Vec::new();
     let mut m = 0;
     while m < total {
-        let end = if layout.restart > 0 { (m + layout.restart).min(total) } else { total };
+        let end = if layout.restart > 0 {
+            (m + layout.restart).min(total)
+        } else {
+            total
+        };
         segment.clear();
         {
             let mut c = Coder {
@@ -128,7 +140,14 @@ impl Coder<'_> {
             let v = val(k);
             self.e.encode_fixed(v < 0);
             let x2 = if k <= 5 { 189 } else { 217 };
-            magnitude(&mut self.e, st, 3 * (k - 1) + 2, 3 * (k - 1) + 2, x2, v.unsigned_abs() - 1);
+            magnitude(
+                &mut self.e,
+                st,
+                3 * (k - 1) + 2,
+                3 * (k - 1) + 2,
+                x2,
+                v.unsigned_abs() - 1,
+            );
             k += 1;
         }
     }
@@ -169,7 +188,14 @@ impl Coder<'_> {
 
 /// Figures F.8 and F.9: the magnitude category of `sz` and its low bits,
 /// starting at bin `s`, with X1 and X2 as given.
-fn magnitude(e: &mut ArithEncoder<'_>, st: &mut [Context], mut s: usize, x1: usize, x2: usize, sz: u32) {
+fn magnitude(
+    e: &mut ArithEncoder<'_>,
+    st: &mut [Context],
+    mut s: usize,
+    x1: usize,
+    x2: usize,
+    sz: u32,
+) {
     let mut m: u32 = 1;
     if sz >= m {
         e.encode(&mut st[s], true);

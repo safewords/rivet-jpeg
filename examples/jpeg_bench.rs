@@ -34,14 +34,38 @@ fn main() {
         })
         .collect();
     for (progressive, restart_interval) in [(false, 0u16), (false, 64), (true, 0)] {
-        let s = jpeg::EncodeSettings { quality: 85, progressive, restart_interval, ..Default::default() };
-        let (te, f) = best(|| jpeg::encode(&rgb, w as u32, h as u32, jpeg::PixelFormat::Rgb, &s).unwrap());
-        print!("progressive={progressive} restart={restart_interval}: {} bytes, encode {te:?}", f.len());
+        let s = jpeg::EncodeSettings {
+            quality: 85,
+            progressive,
+            restart_interval,
+            ..Default::default()
+        };
+        let (te, f) =
+            best(|| jpeg::encode(&rgb, w as u32, h as u32, jpeg::PixelFormat::Rgb, &s).unwrap());
+        print!(
+            "progressive={progressive} restart={restart_interval}: {} bytes, encode {te:?}",
+            f.len()
+        );
         for threads in [1usize, 0] {
-            let opts = jpeg::DecodeOptions { threads, ..Default::default() };
+            let opts = jpeg::DecodeOptions {
+                threads,
+                ..Default::default()
+            };
             let (td, _) = best(|| jpeg::decode_with(&f, &opts).unwrap());
-            let (tr, px) = best(|| jpeg::decode_with(&f, &opts).unwrap().to_rgb8_with_threads(threads));
-            print!("; {} decode {td:?}, +RGB {tr:?} ({})", if threads == 1 { "1 thread" } else { "all threads" }, px.len());
+            let (tr, px) = best(|| {
+                jpeg::decode_with(&f, &opts)
+                    .unwrap()
+                    .to_rgb8_with_threads(threads)
+            });
+            print!(
+                "; {} decode {td:?}, +RGB {tr:?} ({})",
+                if threads == 1 {
+                    "1 thread"
+                } else {
+                    "all threads"
+                },
+                px.len()
+            );
         }
         println!();
     }

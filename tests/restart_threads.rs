@@ -10,7 +10,14 @@ mod common;
 use jpeg::{DecodeOptions, EncodeSettings, Image, PixelFormat, Subsampling};
 
 fn decode(f: &[u8], threads: usize) -> Option<Image> {
-    jpeg::decode_with(f, &DecodeOptions { threads, ..Default::default() }).ok()
+    jpeg::decode_with(
+        f,
+        &DecodeOptions {
+            threads,
+            ..Default::default()
+        },
+    )
+    .ok()
 }
 
 fn same(f: &[u8], what: &str) {
@@ -20,19 +27,35 @@ fn same(f: &[u8], what: &str) {
         match (&one, &many) {
             (None, None) => {}
             (Some(a), Some(b)) => {
-                assert!(a.planes == b.planes, "{what}: samples differ at {threads} threads");
-                assert_eq!(a.warnings, b.warnings, "{what}: warnings at {threads} threads");
+                assert!(
+                    a.planes == b.planes,
+                    "{what}: samples differ at {threads} threads"
+                );
+                assert_eq!(
+                    a.warnings, b.warnings,
+                    "{what}: warnings at {threads} threads"
+                );
                 assert_eq!(a.complete, b.complete, "{what}");
-                assert_eq!(a.to_rgb8_with_threads(1), b.to_rgb8_with_threads(threads), "{what}: RGB");
+                assert_eq!(
+                    a.to_rgb8_with_threads(1),
+                    b.to_rgb8_with_threads(threads),
+                    "{what}: RGB"
+                );
             }
-            _ => panic!("{what}: one thread {} but {threads} threads {}", one.is_some(), many.is_some()),
+            _ => panic!(
+                "{what}: one thread {} but {threads} threads {}",
+                one.is_some(),
+                many.is_some()
+            ),
         }
     }
 }
 
 /// Every restart marker's offset in `f` (the position of its 0xFF).
 fn markers(f: &[u8]) -> Vec<usize> {
-    (0..f.len() - 1).filter(|&i| f[i] == 0xFF && (0xD0..=0xD7).contains(&f[i + 1])).collect()
+    (0..f.len() - 1)
+        .filter(|&i| f[i] == 0xFF && (0xD0..=0xD7).contains(&f[i + 1]))
+        .collect()
 }
 
 #[test]
@@ -43,14 +66,31 @@ fn intervals_decode_the_same_on_any_thread_count() {
     for (format, pixels) in [(PixelFormat::Rgb, &rgb), (PixelFormat::Luma, &grey)] {
         for sub in [Subsampling::S444, Subsampling::S420, Subsampling::S422] {
             for ri in [1u16, 7, 64, 2000] {
-                let s = EncodeSettings { quality: 88, subsampling: sub, restart_interval: ri, threads: 1, ..Default::default() };
+                let s = EncodeSettings {
+                    quality: 88,
+                    subsampling: sub,
+                    restart_interval: ri,
+                    threads: 1,
+                    ..Default::default()
+                };
                 let f = jpeg::encode(pixels, w as u32, h as u32, format, &s).unwrap();
-                let threaded = EncodeSettings { threads: 0, ..s.clone() };
-                assert_eq!(f, jpeg::encode(pixels, w as u32, h as u32, format, &threaded).unwrap(), "encoder bytes");
+                let threaded = EncodeSettings {
+                    threads: 0,
+                    ..s.clone()
+                };
+                assert_eq!(
+                    f,
+                    jpeg::encode(pixels, w as u32, h as u32, format, &threaded).unwrap(),
+                    "encoder bytes"
+                );
                 let what = format!("{format:?} {sub:?} ri={ri}");
                 same(&f, &what);
                 let img = decode(&f, 0).unwrap();
-                assert!(img.complete && img.warnings.is_empty(), "{what}: {:?}", img.warnings);
+                assert!(
+                    img.complete && img.warnings.is_empty(),
+                    "{what}: {:?}",
+                    img.warnings
+                );
 
                 let rst = markers(&f);
                 if rst.len() < 3 {
@@ -72,7 +112,11 @@ fn intervals_decode_the_same_on_any_thread_count() {
                 // A corrupt interval.
                 let mut g = f.clone();
                 for b in &mut g[rst[0] + 2..rst[0] + 12] {
-                    *b = if *b == 0xFF { 0xFF } else { b.wrapping_mul(31) ^ 0x5A };
+                    *b = if *b == 0xFF {
+                        0xFF
+                    } else {
+                        b.wrapping_mul(31) ^ 0x5A
+                    };
                 }
                 same(&g, &format!("{what}, a corrupt interval"));
                 // Truncated mid-scan, and just before the end of the scan.

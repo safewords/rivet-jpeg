@@ -6,7 +6,9 @@
 use std::path::{Path, PathBuf};
 
 fn corpus() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("corpus")
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("corpus")
 }
 
 struct Ref {
@@ -23,16 +25,30 @@ fn read_ref(p: &Path) -> Ref {
     let hdr = std::str::from_utf8(&d[..nl]).unwrap();
     let f: Vec<&str> = hdr.split_whitespace().collect();
     assert_eq!(f[0], "REF");
-    let (w, h, c, bits): (usize, usize, usize, u32) =
-        (f[1].parse().unwrap(), f[2].parse().unwrap(), f[3].parse().unwrap(), f[4].parse().unwrap());
+    let (w, h, c, bits): (usize, usize, usize, u32) = (
+        f[1].parse().unwrap(),
+        f[2].parse().unwrap(),
+        f[3].parse().unwrap(),
+        f[4].parse().unwrap(),
+    );
     let body = &d[nl + 1..];
     let samples: Vec<u16> = if bits <= 8 {
         body.iter().map(|&b| u16::from(b)).collect()
     } else {
-        body.as_chunks::<2>().0.iter().map(|b| u16::from_be_bytes(*b)).collect()
+        body.as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| u16::from_be_bytes(*b))
+            .collect()
     };
     assert_eq!(samples.len(), w * h * c, "{}", p.display());
-    Ref { w, h, c, bits, samples }
+    Ref {
+        w,
+        h,
+        c,
+        bits,
+        samples,
+    }
 }
 
 /// Max |diff|, mean |diff| and PSNR (against the full scale of `bits`).
@@ -49,7 +65,11 @@ fn compare(a: &[u16], b: &[u16], bits: u32) -> (u32, f64, f64) {
     }
     let n = a.len() as f64;
     let peak = f64::from((1u32 << bits) - 1);
-    let psnr = if sq == 0.0 { f64::INFINITY } else { 10.0 * (peak * peak / (sq / n)).log10() };
+    let psnr = if sq == 0.0 {
+        f64::INFINITY
+    } else {
+        10.0 * (peak * peak / (sq / n)).log10()
+    };
     (max, sum / n, psnr)
 }
 
@@ -74,7 +94,12 @@ fn rendering(img: &jpeg::Image, r: &Ref, lossless: bool) -> Vec<u16> {
             if r.bits <= 8 {
                 img.to_luma8().into_iter().map(u16::from).collect()
             } else {
-                img.planes[0].data.chunks(img.planes[0].stride).take(h).flat_map(|row| row[..w].to_vec()).collect()
+                img.planes[0]
+                    .data
+                    .chunks(img.planes[0].stride)
+                    .take(h)
+                    .flat_map(|row| row[..w].to_vec())
+                    .collect()
             }
         }
         3 => {
@@ -82,13 +107,20 @@ fn rendering(img: &jpeg::Image, r: &Ref, lossless: bool) -> Vec<u16> {
                 img.to_rgb8().into_iter().map(u16::from).collect()
             } else {
                 let max = (1u32 << r.bits) - 1;
-                img.to_rgb16().into_iter().map(|v| ((u32::from(v) * max + 32767) / 65535) as u16).collect()
+                img.to_rgb16()
+                    .into_iter()
+                    .map(|v| ((u32::from(v) * max + 32767) / 65535) as u16)
+                    .collect()
             }
         }
         4 => {
             // libjpeg returns CMYK as stored; Adobe stores it inverted.
             let inverted = img.info.adobe.is_some();
-            img.to_cmyk8().unwrap().into_iter().map(|v| u16::from(if inverted { 255 - v } else { v })).collect()
+            img.to_cmyk8()
+                .unwrap()
+                .into_iter()
+                .map(|v| u16::from(if inverted { 255 - v } else { v }))
+                .collect()
         }
         _ => unreachable!(),
     }
@@ -104,14 +136,25 @@ fn generated_corpus_matches_its_references() {
         .collect();
     names.sort();
     assert!(names.len() >= 30, "{} files", names.len());
-    println!("{:<34} {:>5} {:>6} {:>8} {:>8}", "file", "max", "mean", "PSNR dB", "verdict");
+    println!(
+        "{:<34} {:>5} {:>6} {:>8} {:>8}",
+        "file", "max", "mean", "PSNR dB", "verdict"
+    );
     let mut failures = Vec::new();
     for name in &names {
         let data = std::fs::read(dir.join(name)).unwrap();
         let img = jpeg::decode(&data).unwrap_or_else(|e| panic!("{name}: {e}"));
-        assert!(img.complete && img.warnings.is_empty(), "{name}: {:?}", img.warnings);
+        assert!(
+            img.complete && img.warnings.is_empty(),
+            "{name}: {:?}",
+            img.warnings
+        );
         let r = read_ref(&dir.join(name.replace(".jpg", ".ref")));
-        assert_eq!((r.w, r.h), (img.info.width as usize, img.info.height as usize), "{name}");
+        assert_eq!(
+            (r.w, r.h),
+            (img.info.width as usize, img.info.height as usize),
+            "{name}"
+        );
         let lossless = img.info.process == jpeg::Process::Lossless;
         let mine = rendering(&img, &r, lossless);
         let (max, mean, psnr) = compare(&mine, &r.samples, r.bits);
@@ -141,7 +184,11 @@ fn generated_corpus_matches_its_references() {
         let ok = if odd_ratio { psnr > 35.0 } else { max <= limit };
         println!(
             "{name:<34} {max:>5} {mean:>6.3} {:>8} {:>8}",
-            if psnr.is_finite() { format!("{psnr:.2}") } else { "exact".into() },
+            if psnr.is_finite() {
+                format!("{psnr:.2}")
+            } else {
+                "exact".into()
+            },
             if ok { "ok" } else { "FAIL" }
         );
         if !ok {
@@ -156,7 +203,11 @@ fn ijg_test_images() {
     let dir = corpus();
     let decode = |n: &str| {
         let img = jpeg::decode(&std::fs::read(dir.join(n)).unwrap()).unwrap();
-        assert!(img.complete && img.warnings.is_empty(), "{n}: {:?}", img.warnings);
+        assert!(
+            img.complete && img.warnings.is_empty(),
+            "{n}: {:?}",
+            img.warnings
+        );
         img
     };
     let orig = decode("ijg-testorig.jpg");
@@ -184,7 +235,11 @@ fn camera_files() {
     let dir = corpus();
     for (n, process, precision) in [
         ("dng-canon-5d3-lossless14.jpg", jpeg::Process::Lossless, 14),
-        ("dng-blackmagic-ext12.jpg", jpeg::Process::ExtendedSequential, 12),
+        (
+            "dng-blackmagic-ext12.jpg",
+            jpeg::Process::ExtendedSequential,
+            12,
+        ),
         ("dng-adobe-lossy-tile.jpg", jpeg::Process::Baseline, 8),
     ] {
         let data = std::fs::read(dir.join(n)).unwrap();
@@ -192,7 +247,15 @@ fn camera_files() {
         assert!(img.complete, "{n}");
         // Adobe's DNG writer uses an all-1s Huffman code, which T.81
         // reserves; nothing else may be reported.
-        assert!(img.warnings.iter().all(|w| w.contains("all-1s")), "{n}: {:?}", img.warnings);
-        assert_eq!((img.info.process, img.info.precision), (process, precision), "{n}");
+        assert!(
+            img.warnings.iter().all(|w| w.contains("all-1s")),
+            "{n}: {:?}",
+            img.warnings
+        );
+        assert_eq!(
+            (img.info.process, img.info.precision),
+            (process, precision),
+            "{n}"
+        );
     }
 }

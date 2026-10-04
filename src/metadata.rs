@@ -104,7 +104,10 @@ impl Orientation {
 
     /// Whether making the picture upright swaps its width and height.
     pub fn swaps_dimensions(self) -> bool {
-        matches!(self, Self::Transpose | Self::Rotate90 | Self::Transverse | Self::Rotate270)
+        matches!(
+            self,
+            Self::Transpose | Self::Rotate90 | Self::Transverse | Self::Rotate270
+        )
     }
 }
 
@@ -121,12 +124,20 @@ pub(crate) fn exif_orientation(tiff: &[u8]) -> Option<Orientation> {
     };
     let u16_at = |o: usize| -> Option<u16> {
         let b = tiff.get(o..o + 2)?;
-        Some(if le { u16::from_le_bytes([b[0], b[1]]) } else { u16::from_be_bytes([b[0], b[1]]) })
+        Some(if le {
+            u16::from_le_bytes([b[0], b[1]])
+        } else {
+            u16::from_be_bytes([b[0], b[1]])
+        })
     };
     let u32_at = |o: usize| -> Option<u32> {
         let b = tiff.get(o..o + 4)?;
         let a = [b[0], b[1], b[2], b[3]];
-        Some(if le { u32::from_le_bytes(a) } else { u32::from_be_bytes(a) })
+        Some(if le {
+            u32::from_le_bytes(a)
+        } else {
+            u32::from_be_bytes(a)
+        })
     };
     let ifd = usize::try_from(u32_at(4)?).ok()?;
     let count = usize::from(u16_at(ifd)?);

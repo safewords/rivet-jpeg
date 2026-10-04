@@ -15,7 +15,10 @@ pub(crate) struct TableSpec {
 
 impl TableSpec {
     pub(crate) fn new(bits: &[u8; 16], values: &[u8]) -> Self {
-        Self { bits: *bits, values: values.to_vec() }
+        Self {
+            bits: *bits,
+            values: values.to_vec(),
+        }
     }
 
     /// HUFFSIZE and HUFFCODE of Annex C (Figures C.1 and C.2): the length
@@ -26,7 +29,10 @@ impl TableSpec {
     pub(crate) fn codes(&self) -> Result<(Vec<(u8, u16)>, bool)> {
         let total: usize = self.bits.iter().map(|&b| usize::from(b)).sum();
         if total != self.values.len() || total > 256 {
-            return Err(invalid(format!("Huffman table: BITS count {total} symbols, {} given", self.values.len())));
+            return Err(invalid(format!(
+                "Huffman table: BITS count {total} symbols, {} given",
+                self.values.len()
+            )));
         }
         let mut out = Vec::with_capacity(total);
         let mut code: u32 = 0;
@@ -95,7 +101,13 @@ impl DecodeTable {
                 }
             }
         }
-        Ok(Self { fast, maxcode, offset, values: spec.values.clone(), all_ones })
+        Ok(Self {
+            fast,
+            maxcode,
+            offset,
+            values: spec.values.clone(),
+            all_ones,
+        })
     }
 
     /// Decode one symbol. A bit pattern that matches no code is an error.
@@ -166,7 +178,9 @@ fn code_sizes(f: &[u64; 257]) -> [u32; 257] {
             best
         };
         let Some(mut v1) = least(None, &f) else { break };
-        let Some(mut v2) = least(Some(v1), &f) else { break };
+        let Some(mut v2) = least(Some(v1), &f) else {
+            break;
+        };
         f[v1] += f[v2];
         f[v2] = 0;
         codesize[v1] += 1;
@@ -277,7 +291,10 @@ mod tests {
         // Kraft sum, with the reserved point, is exactly one.
         let kraft: f64 = codes.iter().map(|&(l, _)| 2f64.powi(-i32::from(l))).sum();
         let longest = codes.iter().map(|c| c.0).max().unwrap();
-        assert!((kraft + 2f64.powi(-i32::from(longest)) - 1.0).abs() < 1e-12, "{kraft}");
+        assert!(
+            (kraft + 2f64.powi(-i32::from(longest)) - 1.0).abs() < 1e-12,
+            "{kraft}"
+        );
     }
 
     #[test]

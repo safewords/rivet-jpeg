@@ -9,8 +9,8 @@ use crate::error::{Result, config};
 use crate::huffman::TableSpec;
 use crate::metadata::{EXIF_MAX, ICC_CHUNK};
 use crate::tables::{
-    CHROMA_AC_BITS, CHROMA_AC_VALUES, CHROMA_DC_BITS, CHROMA_DC_VALUES, CHROMA_QUANT, LUMA_AC_BITS, LUMA_AC_VALUES,
-    LUMA_DC_BITS, LUMA_DC_VALUES, LUMA_QUANT, ZIGZAG,
+    CHROMA_AC_BITS, CHROMA_AC_VALUES, CHROMA_DC_BITS, CHROMA_DC_VALUES, CHROMA_QUANT, LUMA_AC_BITS,
+    LUMA_AC_VALUES, LUMA_DC_BITS, LUMA_DC_VALUES, LUMA_QUANT, ZIGZAG,
 };
 
 /// The layout of the pixels given to [`encode`].
@@ -161,23 +161,43 @@ pub(crate) struct Layout {
 
 /// Encode `pixels` (`width * height` of `format`, row by row) as a JPEG
 /// file.
-pub fn encode(pixels: &[u8], width: u32, height: u32, format: PixelFormat, settings: &EncodeSettings) -> Result<Vec<u8>> {
+pub fn encode(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    format: PixelFormat,
+    settings: &EncodeSettings,
+) -> Result<Vec<u8>> {
     if width == 0 || height == 0 || width > 65535 || height > 65535 {
-        return Err(config(format!("a JPEG frame is 1 to 65535 pixels each way, not {width}x{height}")));
+        return Err(config(format!(
+            "a JPEG frame is 1 to 65535 pixels each way, not {width}x{height}"
+        )));
     }
     if !(1..=100).contains(&settings.quality) {
-        return Err(config(format!("quality {} is outside 1-100", settings.quality)));
+        return Err(config(format!(
+            "quality {} is outside 1-100",
+            settings.quality
+        )));
     }
     let (w, h) = (width as usize, height as usize);
     let need = w * h * format.bytes();
     if pixels.len() != need {
-        return Err(config(format!("{} bytes of pixels for {w}x{h} {format:?}; expected {need}", pixels.len())));
+        return Err(config(format!(
+            "{} bytes of pixels for {w}x{h} {format:?}; expected {need}",
+            pixels.len()
+        )));
     }
-    let exif = settings.exif.as_deref().map(|e| e.strip_prefix(b"Exif\0\0").unwrap_or(e));
+    let exif = settings
+        .exif
+        .as_deref()
+        .map(|e| e.strip_prefix(b"Exif\0\0").unwrap_or(e));
     if let Some(e) = exif
         && e.len() > EXIF_MAX
     {
-        return Err(config(format!("EXIF of {} bytes; one APP1 segment holds {EXIF_MAX}", e.len())));
+        return Err(config(format!(
+            "EXIF of {} bytes; one APP1 segment holds {EXIF_MAX}",
+            e.len()
+        )));
     }
     if let Some(p) = &settings.icc_profile
         && p.len().div_ceil(ICC_CHUNK) > 255
@@ -186,17 +206,44 @@ pub fn encode(pixels: &[u8], width: u32, height: u32, format: PixelFormat, setti
     }
 
     let grey = format == PixelFormat::Luma;
-    let (hy, vy) = if grey { (1, 1) } else { settings.subsampling.luma_factors() };
+    let (hy, vy) = if grey {
+        (1, 1)
+    } else {
+        settings.subsampling.luma_factors()
+    };
     let mcus_x = w.div_ceil(8 * hy);
     let mcus_y = h.div_ceil(8 * vy);
-    let qtables = [scaled_table(&LUMA_QUANT, settings.quality), scaled_table(&CHROMA_QUANT, settings.quality)];
-    let comps = prepare(pixels, w, h, format, hy, vy, mcus_x, mcus_y, &qtables, settings.threads);
-    let layout = Layout { mcus_x, mcus_y, restart: usize::from(settings.restart_interval), threads: settings.threads };
+    let qtables = [
+        scaled_table(&LUMA_QUANT, settings.quality),
+        scaled_table(&CHROMA_QUANT, settings.quality),
+    ];
+    let comps = prepare(
+        pixels,
+        w,
+        h,
+        format,
+        hy,
+        vy,
+        mcus_x,
+        mcus_y,
+        &qtables,
+        settings.threads,
+    );
+    let layout = Layout {
+        mcus_x,
+        mcus_y,
+        restart: usize::from(settings.restart_interval),
+        threads: settings.threads,
+    };
 
     let mut out = Vec::with_capacity(w * h / 4 + 1024);
     out.extend_from_slice(&[0xFF, 0xD8]);
     if settings.jfif {
-        segment(&mut out, 0xE0, &[b'J', b'F', b'I', b'F', 0, 1, 2, 0, 0, 1, 0, 1, 0, 0]);
+        segment(
+            &mut out,
+            0xE0,
+            &[b'J', b'F', b'I', b'F', 0, 1, 2, 0, 0, 1, 0, 1, 0, 0],
+        );
     }
     if let Some(e) = exif {
         let mut p = b"Exif\0\0".to_vec();
@@ -242,7 +289,13 @@ pub fn encode(pixels: &[u8], width: u32, height: u32, format: PixelFormat, setti
     let scans: Vec<ScanSpec> = if settings.progressive {
         progression(comps.len())
     } else {
-        vec![ScanSpec { comps: if grey { 1 } else { 7 }, ss: 0, se: 63, ah: 0, al: 0 }]
+        vec![ScanSpec {
+            comps: if grey { 1 } else { 7 },
+            ss: 0,
+            se: 63,
+            ah: 0,
+            al: 0,
+        }]
     };
     // Each scan depends only on the coefficients, so a progression's scans
     // are coded on several threads and joined in order.
@@ -261,7 +314,14 @@ pub fn encode(pixels: &[u8], width: u32, height: u32, format: PixelFormat, setti
             };
             write_dht(&mut out, &comps, scan, &tables);
             sos(&mut out, &comps, scan);
-            huff::encode_scan(&mut out, &comps, &layout, scan, &tables, settings.progressive)?;
+            huff::encode_scan(
+                &mut out,
+                &comps,
+                &layout,
+                scan,
+                &tables,
+                settings.progressive,
+            )?;
         }
         Ok(out)
     });
@@ -277,21 +337,81 @@ pub fn encode(pixels: &[u8], width: u32, height: u32, format: PixelFormat, setti
 fn progression(ncomps: usize) -> Vec<ScanSpec> {
     let all = if ncomps == 1 { 1 } else { 7 };
     let mut s = vec![
-        ScanSpec { comps: all, ss: 0, se: 0, ah: 0, al: 1 },
-        ScanSpec { comps: 1, ss: 1, se: 5, ah: 0, al: 2 },
+        ScanSpec {
+            comps: all,
+            ss: 0,
+            se: 0,
+            ah: 0,
+            al: 1,
+        },
+        ScanSpec {
+            comps: 1,
+            ss: 1,
+            se: 5,
+            ah: 0,
+            al: 2,
+        },
     ];
     if ncomps > 1 {
-        s.push(ScanSpec { comps: 4, ss: 1, se: 63, ah: 0, al: 1 });
-        s.push(ScanSpec { comps: 2, ss: 1, se: 63, ah: 0, al: 1 });
+        s.push(ScanSpec {
+            comps: 4,
+            ss: 1,
+            se: 63,
+            ah: 0,
+            al: 1,
+        });
+        s.push(ScanSpec {
+            comps: 2,
+            ss: 1,
+            se: 63,
+            ah: 0,
+            al: 1,
+        });
     }
-    s.push(ScanSpec { comps: 1, ss: 6, se: 63, ah: 0, al: 2 });
-    s.push(ScanSpec { comps: 1, ss: 1, se: 63, ah: 2, al: 1 });
-    s.push(ScanSpec { comps: all, ss: 0, se: 0, ah: 1, al: 0 });
+    s.push(ScanSpec {
+        comps: 1,
+        ss: 6,
+        se: 63,
+        ah: 0,
+        al: 2,
+    });
+    s.push(ScanSpec {
+        comps: 1,
+        ss: 1,
+        se: 63,
+        ah: 2,
+        al: 1,
+    });
+    s.push(ScanSpec {
+        comps: all,
+        ss: 0,
+        se: 0,
+        ah: 1,
+        al: 0,
+    });
     if ncomps > 1 {
-        s.push(ScanSpec { comps: 4, ss: 1, se: 63, ah: 1, al: 0 });
-        s.push(ScanSpec { comps: 2, ss: 1, se: 63, ah: 1, al: 0 });
+        s.push(ScanSpec {
+            comps: 4,
+            ss: 1,
+            se: 63,
+            ah: 1,
+            al: 0,
+        });
+        s.push(ScanSpec {
+            comps: 2,
+            ss: 1,
+            se: 63,
+            ah: 1,
+            al: 0,
+        });
     }
-    s.push(ScanSpec { comps: 1, ss: 1, se: 63, ah: 1, al: 0 });
+    s.push(ScanSpec {
+        comps: 1,
+        ss: 1,
+        se: 63,
+        ah: 1,
+        al: 0,
+    });
     s
 }
 
@@ -300,16 +420,26 @@ pub(crate) type Tables = [(TableSpec, TableSpec); 2];
 
 fn standard_tables() -> Tables {
     [
-        (TableSpec::new(&LUMA_DC_BITS, &LUMA_DC_VALUES), TableSpec::new(&LUMA_AC_BITS, &LUMA_AC_VALUES)),
-        (TableSpec::new(&CHROMA_DC_BITS, &CHROMA_DC_VALUES), TableSpec::new(&CHROMA_AC_BITS, &CHROMA_AC_VALUES)),
+        (
+            TableSpec::new(&LUMA_DC_BITS, &LUMA_DC_VALUES),
+            TableSpec::new(&LUMA_AC_BITS, &LUMA_AC_VALUES),
+        ),
+        (
+            TableSpec::new(&CHROMA_DC_BITS, &CHROMA_DC_VALUES),
+            TableSpec::new(&CHROMA_AC_BITS, &CHROMA_AC_VALUES),
+        ),
     ]
 }
 
 /// The tables the scan uses, in one DHT segment.
 fn write_dht(out: &mut Vec<u8>, comps: &[CompCoefs], scan: &ScanSpec, tables: &Tables) {
     let mut p = Vec::new();
-    let mut slots: Vec<usize> =
-        comps.iter().enumerate().filter(|(i, _)| scan.comps & (1 << i) != 0).map(|(_, c)| c.table).collect();
+    let mut slots: Vec<usize> = comps
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| scan.comps & (1 << i) != 0)
+        .map(|(_, c)| c.table)
+        .collect();
     slots.sort_unstable();
     slots.dedup();
     let dc = scan.ss == 0 && scan.ah == 0;
@@ -335,7 +465,9 @@ fn push_table(p: &mut Vec<u8>, class: u8, slot: usize, t: &TableSpec) {
 
 fn sos(out: &mut Vec<u8>, comps: &[CompCoefs], scan: &ScanSpec) {
     let mut p = Vec::new();
-    let members: Vec<usize> = (0..comps.len()).filter(|i| scan.comps & (1 << i) != 0).collect();
+    let members: Vec<usize> = (0..comps.len())
+        .filter(|i| scan.comps & (1 << i) != 0)
+        .collect();
     p.push(members.len() as u8);
     for &i in &members {
         let t = comps[i].table as u8;
@@ -373,7 +505,9 @@ fn prepare(
 ) -> Vec<CompCoefs> {
     let ncomp = if format == PixelFormat::Luma { 1 } else { 3 };
     let rows = crate::par::map(mcus_y, threads, |r| {
-        crate::simd::with_wide_vectors(|| prepare_mcu_row(pixels, w, h, format, hy, vy, mcus_x, r, qtables))
+        crate::simd::with_wide_vectors(|| {
+            prepare_mcu_row(pixels, w, h, format, hy, vy, mcus_x, r, qtables)
+        })
     });
     let mut out = Vec::with_capacity(ncomp);
     for ci in 0..ncomp {
@@ -431,7 +565,11 @@ fn prepare_mcu_row(
         } else {
             let (l, rest) = full.split_at_mut(1);
             let (cb, cr) = rest.split_at_mut(1);
-            let (l, cb, cr) = (&mut l[0][at..at + pw], &mut cb[0][at..at + pw], &mut cr[0][at..at + pw]);
+            let (l, cb, cr) = (
+                &mut l[0][at..at + pw],
+                &mut cb[0][at..at + pw],
+                &mut cr[0][at..at + pw],
+            );
             for x in 0..pw {
                 let p = &src[x.min(w - 1) * bpp..];
                 let (r, g, b) = (f32::from(p[0]), f32::from(p[1]), f32::from(p[2]));

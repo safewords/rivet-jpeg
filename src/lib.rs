@@ -47,7 +47,8 @@ mod simd;
 mod tables;
 
 pub use decode::{
-    Coding, ColourSpace, Component, DecodeOptions, Image, Info, Plane, Process, decode, decode_with, read_info,
+    Coding, ColourSpace, Component, DecodeOptions, Image, Info, Plane, Process, decode,
+    decode_with, read_info,
 };
 pub use encode::{EncodeSettings, PixelFormat, Subsampling, encode};
 pub use error::{Error, Result};

@@ -29,7 +29,12 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
     let start = dec.pos;
     let strict = dec.opts.strict;
     let ri = usize::from(dec.restart_interval);
-    let Decoder { tables, planes, warnings, .. } = dec;
+    let Decoder {
+        tables,
+        planes,
+        warnings,
+        ..
+    } = dec;
     let mut warn = |msg: String| -> Result<()> {
         if strict {
             return Err(invalid(msg));
@@ -60,7 +65,11 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
     // For the arithmetic model: per scan component, the differences coded
     // most recently at each column: the line above (Db) at `x` until it is
     // overwritten, the current line (Da) at `x - 1`.
-    let mut above: Vec<Vec<i32>> = scan.comps.iter().map(|c| vec![0; frame.comps[c.ci].stride]).collect();
+    let mut above: Vec<Vec<i32>> = scan
+        .comps
+        .iter()
+        .map(|c| vec![0; frame.comps[c.ci].stride])
+        .collect();
     // The line, per component, where the current restart interval began.
     let mut interval_row = vec![0usize; scan.comps.len()];
     let mut next_rst = 0u8;
@@ -69,7 +78,9 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
     let mut m = 0usize;
     'mcus: while m < total {
         if ri > 0 && m > 0 && m.is_multiple_of(ri) {
-            let pos = huff.as_ref().map_or_else(|| ari.as_ref().map_or(0, |a| a.pos()), |h| h.pos());
+            let pos = huff
+                .as_ref()
+                .map_or_else(|| ari.as_ref().map_or(0, |a| a.pos()), |h| h.pos());
             let (found, clean) = find_restart(data, pos, next_rst);
             if !clean {
                 warn(format!("data before restart marker RST{next_rst}"))?;
@@ -77,7 +88,9 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
             let pos = match found {
                 Restart::Found { pos } => pos,
                 Restart::Skipped { pos, skipped } => {
-                    warn(format!("restart marker RST{next_rst} missing; {skipped} interval(s) lost"))?;
+                    warn(format!(
+                        "restart marker RST{next_rst} missing; {skipped} interval(s) lost"
+                    ))?;
                     next_rst = (next_rst + skipped as u8) % 8;
                     m += skipped * ri;
                     if m >= total {
@@ -97,7 +110,9 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
             }
             if let Some(a) = ari.as_mut() {
                 a.reset_at(pos);
-                stats.iter_mut().for_each(|s| *s = [Context::default(); 158]);
+                stats
+                    .iter_mut()
+                    .for_each(|s| *s = [Context::default(); 158]);
             }
             for a in &mut above {
                 a.iter_mut().for_each(|d| *d = 0);
@@ -119,8 +134,16 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
                     let plane = &planes[sc.ci];
                     let at = y * stride + x;
                     let ra = if x > 0 { i32::from(plane[at - 1]) } else { 0 };
-                    let rb = if y > 0 { i32::from(plane[at - stride]) } else { 0 };
-                    let rc = if x > 0 && y > 0 { i32::from(plane[at - stride - 1]) } else { 0 };
+                    let rb = if y > 0 {
+                        i32::from(plane[at - stride])
+                    } else {
+                        0
+                    };
+                    let rc = if x > 0 && y > 0 {
+                        i32::from(plane[at - stride - 1])
+                    } else {
+                        0
+                    };
                     let first_line = y == interval_row[si];
                     let px = if first_line {
                         if x == 0 { initial } else { ra }
@@ -138,7 +161,9 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
                         }
                     };
                     let diff = if let Some(r) = huff.as_mut() {
-                        let t = tables.dc[sc.td].as_ref().ok_or_else(|| invalid("no Huffman table"))?;
+                        let t = tables.dc[sc.td]
+                            .as_ref()
+                            .ok_or_else(|| invalid("no Huffman table"))?;
                         match t.decode(r) {
                             Ok(s) => {
                                 let s = u32::from(s);
@@ -160,7 +185,12 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
                         let (l, u) = tables.dc_cond[sc.td];
                         let db = if first_line { 0 } else { above[si][x] };
                         let da = if x == 0 { 0 } else { above[si][x - 1] };
-                        match arith_diff(a, &mut stats[sc.td], category(da, l, u), category(db, l, u)) {
+                        match arith_diff(
+                            a,
+                            &mut stats[sc.td],
+                            category(da, l, u),
+                            category(db, l, u),
+                        ) {
                             Ok(d) => d,
                             Err(e) => {
                                 warn(format!("{e}"))?;
@@ -217,7 +247,12 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
 }
 
 /// H.1.2.3: one difference with the two-dimensional model.
-fn arith_diff(d: &mut ArithDecoder<'_>, st: &mut [Context; 158], ca: usize, cb: usize) -> Result<i32> {
+fn arith_diff(
+    d: &mut ArithDecoder<'_>,
+    st: &mut [Context; 158],
+    ca: usize,
+    cb: usize,
+) -> Result<i32> {
     let s0 = 20 * ca + 4 * cb;
     if !d.decode(&mut st[s0]) {
         return Ok(0);

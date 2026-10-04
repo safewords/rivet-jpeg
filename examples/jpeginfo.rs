@@ -19,7 +19,10 @@ fn main() {
                 i.coding,
                 i.precision,
                 i.colour_space,
-                i.components.iter().map(|c| (c.id, c.h, c.v)).collect::<Vec<_>>(),
+                i.components
+                    .iter()
+                    .map(|c| (c.id, c.h, c.v))
+                    .collect::<Vec<_>>(),
                 i.restart_interval,
                 i.scans,
                 img.complete,

@@ -21,8 +21,16 @@ fn reference_fdct(s: &[f64; 64]) -> [f64; 64] {
     let mut out = [0f64; 64];
     for v in 0..8 {
         for u in 0..8 {
-            let cu = if u == 0 { std::f64::consts::FRAC_1_SQRT_2 } else { 1.0 };
-            let cv = if v == 0 { std::f64::consts::FRAC_1_SQRT_2 } else { 1.0 };
+            let cu = if u == 0 {
+                std::f64::consts::FRAC_1_SQRT_2
+            } else {
+                1.0
+            };
+            let cv = if v == 0 {
+                std::f64::consts::FRAC_1_SQRT_2
+            } else {
+                1.0
+            };
             let mut sum = 0.0;
             for y in 0..8 {
                 for x in 0..8 {
@@ -44,8 +52,16 @@ fn reference_idct(f: &[f64; 64]) -> [f64; 64] {
             let mut sum = 0.0;
             for v in 0..8 {
                 for u in 0..8 {
-                    let cu = if u == 0 { std::f64::consts::FRAC_1_SQRT_2 } else { 1.0 };
-                    let cv = if v == 0 { std::f64::consts::FRAC_1_SQRT_2 } else { 1.0 };
+                    let cu = if u == 0 {
+                        std::f64::consts::FRAC_1_SQRT_2
+                    } else {
+                        1.0
+                    };
+                    let cv = if v == 0 {
+                        std::f64::consts::FRAC_1_SQRT_2
+                    } else {
+                        1.0
+                    };
                     sum += cu
                         * cv
                         * f[v * 8 + u]
@@ -79,7 +95,12 @@ struct Stats {
 
 fn run(low: i64, high: i64, sign: i64, blocks: usize) -> Stats {
     let mut rng = Lcg(1);
-    let mut st = Stats { peak: [0; 64], se: [0.0; 64], e: [0.0; 64], n: blocks };
+    let mut st = Stats {
+        peak: [0; 64],
+        se: [0.0; 64],
+        e: [0.0; 64],
+        n: blocks,
+    };
     for _ in 0..blocks {
         let mut s = [0f64; 64];
         for v in &mut s {
@@ -121,7 +142,9 @@ fn idct_meets_ieee_1180() {
             let omse = st.se.iter().sum::<f64>() / (n * 64.0);
             let pme = st.e.iter().map(|v| (v / n).abs()).fold(0.0, f64::max);
             let ome = (st.e.iter().sum::<f64>() / (n * 64.0)).abs();
-            println!("{low:>5}..{high:<4} {sign:>3}   {peak}     {pmse:.5}     {omse:.6} {pme:.5}    {ome:.6}");
+            println!(
+                "{low:>5}..{high:<4} {sign:>3}   {peak}     {pmse:.5}     {omse:.6} {pme:.5}    {ome:.6}"
+            );
             assert!(peak <= 1, "peak error {peak}");
             assert!(pmse <= 0.06, "position MSE {pmse}");
             assert!(omse <= 0.02, "overall MSE {omse}");

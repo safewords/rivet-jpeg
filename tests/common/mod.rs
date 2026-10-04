@@ -21,7 +21,9 @@ pub fn picture(w: usize, h: usize) -> Vec<u8> {
                 r = 255.0 - r;
                 g = 40.0;
             }
-            if ((x as i64 - w as i64 / 2).pow(2) + (y as i64 - h as i64 / 2).pow(2)) < (w.min(h) as i64 / 4).pow(2) {
+            if ((x as i64 - w as i64 / 2).pow(2) + (y as i64 - h as i64 / 2).pow(2))
+                < (w.min(h) as i64 / 4).pow(2)
+            {
                 b = 230.0;
                 r *= 0.5;
             }
@@ -36,14 +38,30 @@ pub fn picture(w: usize, h: usize) -> Vec<u8> {
 /// PSNR in dB between two equal-length 8-bit buffers.
 pub fn psnr(a: &[u8], b: &[u8]) -> f64 {
     assert_eq!(a.len(), b.len());
-    let mse: f64 = a.iter().zip(b).map(|(&x, &y)| (f64::from(x) - f64::from(y)).powi(2)).sum::<f64>() / a.len() as f64;
-    if mse == 0.0 { f64::INFINITY } else { 10.0 * (255.0f64 * 255.0 / mse).log10() }
+    let mse: f64 = a
+        .iter()
+        .zip(b)
+        .map(|(&x, &y)| (f64::from(x) - f64::from(y)).powi(2))
+        .sum::<f64>()
+        / a.len() as f64;
+    if mse == 0.0 {
+        f64::INFINITY
+    } else {
+        10.0 * (255.0f64 * 255.0 / mse).log10()
+    }
 }
 
 /// Decode strictly: every file this crate writes must pass.
 pub fn strict(file: &[u8]) -> jpeg::Image {
-    let opts = jpeg::DecodeOptions { strict: true, ..Default::default() };
+    let opts = jpeg::DecodeOptions {
+        strict: true,
+        ..Default::default()
+    };
     let img = jpeg::decode_with(file, &opts).expect("strict decode");
-    assert!(img.complete && img.warnings.is_empty(), "{:?}", img.warnings);
+    assert!(
+        img.complete && img.warnings.is_empty(),
+        "{:?}",
+        img.warnings
+    );
     img
 }

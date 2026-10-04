@@ -47,7 +47,13 @@ pub(super) fn find_restart(data: &[u8], mut pos: usize, expected: u8) -> (Restar
             if skipped == 0 {
                 return (Restart::Found { pos: pos + 2 }, clean);
             }
-            return (Restart::Skipped { pos: pos + 2, skipped }, false);
+            return (
+                Restart::Skipped {
+                    pos: pos + 2,
+                    skipped,
+                },
+                false,
+            );
         }
         return (Restart::End, clean);
     }
@@ -84,9 +90,17 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
     let single = scan.comps.len() == 1;
     let geo = if single {
         let c = &frame.comps[scan.comps[0].ci];
-        Geometry { mcus_x: c.units_w, mcus_y: c.units_h, single }
+        Geometry {
+            mcus_x: c.units_w,
+            mcus_y: c.units_h,
+            single,
+        }
     } else {
-        Geometry { mcus_x: frame.mcus_x, mcus_y: frame.mcus_y, single }
+        Geometry {
+            mcus_x: frame.mcus_x,
+            mcus_y: frame.mcus_y,
+            single,
+        }
     };
     let data = dec.data;
     let start = dec.pos;
@@ -98,17 +112,38 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
     // them side by side when there are several and the scan is big enough.
     if !frame.arithmetic && !frame.progressive && ri > 0 && total > ri {
         let threads = crate::par::threads(dec.opts.threads);
-        let per_mcu: usize =
-            if single { 1 } else { scan.comps.iter().map(|c| frame.comps[c.ci].h * frame.comps[c.ci].v).sum() };
+        let per_mcu: usize = if single {
+            1
+        } else {
+            scan.comps
+                .iter()
+                .map(|c| frame.comps[c.ci].h * frame.comps[c.ci].v)
+                .sum()
+        };
         if threads > 1
             && total * per_mcu >= PARALLEL_MIN_BLOCKS
-            && let Some(pos) = intervals_in_parallel(data, start, &dec.tables, frame, scan, &geo, ri, threads, &mut dec.coefs)
+            && let Some(pos) = intervals_in_parallel(
+                data,
+                start,
+                &dec.tables,
+                frame,
+                scan,
+                &geo,
+                ri,
+                threads,
+                &mut dec.coefs,
+            )
         {
             dec.pos = pos;
             return Ok(ScanEnd::Complete);
         }
     }
-    let Decoder { tables, coefs, warnings, .. } = dec;
+    let Decoder {
+        tables,
+        coefs,
+        warnings,
+        ..
+    } = dec;
     let tables: &Tables = tables;
     let mut ent = if frame.arithmetic {
         Entropy::Arith(Box::new(ArithState {
@@ -120,8 +155,16 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
     } else {
         Entropy::Huff(HuffState {
             r: BitReader::new(data, start),
-            dc: scan.comps.iter().map(|c| tables.dc[c.td].as_ref()).collect(),
-            ac: scan.comps.iter().map(|c| tables.ac[c.ta].as_ref()).collect(),
+            dc: scan
+                .comps
+                .iter()
+                .map(|c| tables.dc[c.td].as_ref())
+                .collect(),
+            ac: scan
+                .comps
+                .iter()
+                .map(|c| tables.ac[c.ta].as_ref())
+                .collect(),
             eobrun: 0,
         })
     };
@@ -159,7 +202,9 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
             let pos = match found {
                 Restart::Found { pos } => pos,
                 Restart::Skipped { pos, skipped } => {
-                    warn(format!("restart marker RST{next_rst} missing; {skipped} interval(s) lost"))?;
+                    warn(format!(
+                        "restart marker RST{next_rst} missing; {skipped} interval(s) lost"
+                    ))?;
                     next_rst = (next_rst + skipped as u8) % 8;
                     m += skipped * ri;
                     if m >= total {
@@ -198,10 +243,30 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
                     let result = if frame.progressive {
                         let at = (by * fc.blocks_stride + bx) * 64;
                         let blk = &mut coefs[sc.ci][at..at + 64];
-                        decode_block(&mut ent, tables, scan, si, sc.td, sc.ta, &mut pred[si], blk, true)
+                        decode_block(
+                            &mut ent,
+                            tables,
+                            scan,
+                            si,
+                            sc.td,
+                            sc.ta,
+                            &mut pred[si],
+                            blk,
+                            true,
+                        )
                     } else {
                         block.fill(0);
-                        let r = decode_block(&mut ent, tables, scan, si, sc.td, sc.ta, &mut pred[si], &mut block, false);
+                        let r = decode_block(
+                            &mut ent,
+                            tables,
+                            scan,
+                            si,
+                            sc.td,
+                            sc.ta,
+                            &mut pred[si],
+                            &mut block,
+                            false,
+                        );
                         if r.is_ok() {
                             // Kept for the transform after the last scan
                             // (`idct_all`), which runs on several threads.
@@ -323,13 +388,32 @@ fn intervals_in_parallel(
     let units: Vec<(usize, usize)> = scan
         .comps
         .iter()
-        .map(|sc| if geo.single { (1, 1) } else { (frame.comps[sc.ci].h, frame.comps[sc.ci].v) })
+        .map(|sc| {
+            if geo.single {
+                (1, 1)
+            } else {
+                (frame.comps[sc.ci].h, frame.comps[sc.ci].v)
+            }
+        })
         .collect();
     let per_mcu: usize = units.iter().map(|&(h, v)| h * v).sum();
-    let dc: Vec<Option<&DecodeTable>> = scan.comps.iter().map(|c| tables.dc[c.td].as_ref()).collect();
-    let ac: Vec<Option<&DecodeTable>> = scan.comps.iter().map(|c| tables.ac[c.ta].as_ref()).collect();
+    let dc: Vec<Option<&DecodeTable>> = scan
+        .comps
+        .iter()
+        .map(|c| tables.dc[c.td].as_ref())
+        .collect();
+    let ac: Vec<Option<&DecodeTable>> = scan
+        .comps
+        .iter()
+        .map(|c| tables.ac[c.ta].as_ref())
+        .collect();
     let decoded = crate::par::map(n, threads, |k| -> Option<(Vec<i16>, usize)> {
-        let mut h = HuffState { r: BitReader::new(data, starts[k]), dc: dc.clone(), ac: ac.clone(), eobrun: 0 };
+        let mut h = HuffState {
+            r: BitReader::new(data, starts[k]),
+            dc: dc.clone(),
+            ac: ac.clone(),
+            eobrun: 0,
+        };
         let mut pred = vec![0i32; units.len()];
         let mcus = k * ri..((k + 1) * ri).min(total);
         let mut out = vec![0i16; mcus.len() * per_mcu * 64];
@@ -374,7 +458,8 @@ fn intervals_in_parallel(
                     for hh in 0..bh {
                         let (bx, by) = (mx * bh + hh, my * bv + v);
                         let at = (by * fc.blocks_stride + bx) * 64;
-                        coefs[sc.ci][at..at + 64].copy_from_slice(blocks.next().expect("one per block"));
+                        coefs[sc.ci][at..at + 64]
+                            .copy_from_slice(blocks.next().expect("one per block"));
                     }
                 }
             }
@@ -443,7 +528,12 @@ fn decode_block(
 
 /// F.2.2: a whole block.
 #[inline]
-fn huff_sequential(h: &mut HuffState<'_>, si: usize, pred: &mut i32, blk: &mut [i16]) -> Result<()> {
+fn huff_sequential(
+    h: &mut HuffState<'_>,
+    si: usize,
+    pred: &mut i32,
+    blk: &mut [i16],
+) -> Result<()> {
     let dc = h.dc[si].ok_or_else(|| invalid("no DC table"))?;
     let ac = h.ac[si].ok_or_else(|| invalid("no AC table"))?;
     let s = u32::from(dc.decode(&mut h.r)?);
@@ -515,7 +605,11 @@ fn huff_ac_refine(h: &mut HuffState<'_>, si: usize, scan: &Scan, blk: &mut [i16]
     let mut k = scan.ss;
     let refine = |r: &mut BitReader<'_>, c: &mut i16| {
         if r.bit() && (*c & p1) == 0 {
-            *c = if *c >= 0 { c.wrapping_add(p1) } else { c.wrapping_add(m1) };
+            *c = if *c >= 0 {
+                c.wrapping_add(p1)
+            } else {
+                c.wrapping_add(m1)
+            };
         }
     };
     if h.eobrun == 0 {
@@ -526,7 +620,9 @@ fn huff_ac_refine(h: &mut HuffState<'_>, si: usize, scan: &Scan, blk: &mut [i16]
             let mut val = 0i16;
             if s != 0 {
                 if s != 1 {
-                    return Err(invalid(format!("refinement scan with magnitude category {s}")));
+                    return Err(invalid(format!(
+                        "refinement scan with magnitude category {s}"
+                    )));
                 }
                 val = if h.r.bit() { p1 } else { m1 };
             } else if r != 15 {
@@ -625,7 +721,15 @@ impl ArithState<'_> {
     }
 
     /// F.2.4.2 (and G.1.3.2 for a first progressive scan of a band).
-    fn ac_first(&mut self, t: usize, ss: usize, se: usize, al: u8, kx: u8, blk: &mut [i16]) -> Result<()> {
+    fn ac_first(
+        &mut self,
+        t: usize,
+        ss: usize,
+        se: usize,
+        al: u8,
+        kx: u8,
+        blk: &mut [i16],
+    ) -> Result<()> {
         let st = &mut self.ac_stats[t];
         let mut k = ss;
         while k <= se {
@@ -692,7 +796,11 @@ impl ArithState<'_> {
             loop {
                 if blk[k] != 0 {
                     if self.d.decode(&mut st[3 * (k - 1) + 2]) {
-                        blk[k] = if blk[k] >= 0 { blk[k].wrapping_add(p1) } else { blk[k].wrapping_sub(p1) };
+                        blk[k] = if blk[k] >= 0 {
+                            blk[k].wrapping_add(p1)
+                        } else {
+                            blk[k].wrapping_sub(p1)
+                        };
                     }
                     break;
                 }
@@ -702,7 +810,9 @@ impl ArithState<'_> {
                 }
                 k += 1;
                 if k > se {
-                    return Err(invalid("arithmetic refinement run past the end of the band"));
+                    return Err(invalid(
+                        "arithmetic refinement run past the end of the band",
+                    ));
                 }
             }
             k += 1;
@@ -725,8 +835,11 @@ pub(super) fn idct_all(dec: &mut Decoder<'_>, frame: &Frame) {
         let q = dec.comp_quant[ci].unwrap_or([1; 64]);
         let coefs = std::mem::take(&mut dec.coefs[ci]);
         let plane = &mut dec.planes[ci];
-        let (units_w, units_h) =
-            if frame.progressive { (fc.units_w, fc.units_h) } else { (fc.blocks_stride, fc.rows / 8) };
+        let (units_w, units_h) = if frame.progressive {
+            (fc.units_w, fc.units_h)
+        } else {
+            (fc.blocks_stride, fc.rows / 8)
+        };
         let rows = 8 * fc.stride;
         let used = (units_h * rows).min(plane.len());
         crate::par::bands(&mut plane[..used], rows, threads, |bys, band| {

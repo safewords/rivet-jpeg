@@ -34,8 +34,9 @@ pub(crate) fn map<T: Send>(tasks: usize, threads: usize, f: impl Fn(usize) -> T 
     };
     let mut results: Vec<Option<T>> = (0..tasks).map(|_| None).collect();
     std::thread::scope(|s| {
-        let handles: Vec<_> =
-            (1..workers).filter_map(|_| std::thread::Builder::new().spawn_scoped(s, run).ok()).collect();
+        let handles: Vec<_> = (1..workers)
+            .filter_map(|_| std::thread::Builder::new().spawn_scoped(s, run).ok())
+            .collect();
         for (t, r) in run() {
             results[t] = Some(r);
         }
@@ -50,7 +51,10 @@ pub(crate) fn map<T: Send>(tasks: usize, threads: usize, f: impl Fn(usize) -> T 
             }
         }
     });
-    results.into_iter().map(|r| r.expect("every task ran")).collect()
+    results
+        .into_iter()
+        .map(|r| r.expect("every task ran"))
+        .collect()
 }
 
 /// Splits `data`, rows of `row_len`, into contiguous bands of rows and runs
@@ -77,7 +81,9 @@ pub(crate) fn bands<T: Send>(
     let tasks: Vec<Task<T>> = data
         .chunks_mut(per * row_len)
         .enumerate()
-        .map(|(i, band)| std::sync::Mutex::new(Some((i * per..i * per + band.len() / row_len, band))))
+        .map(|(i, band)| {
+            std::sync::Mutex::new(Some((i * per..i * per + band.len() / row_len, band)))
+        })
         .collect();
     let next = AtomicUsize::new(0);
     let run = || {

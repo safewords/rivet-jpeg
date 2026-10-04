@@ -96,7 +96,8 @@ impl Sink for RawWriter<'_> {
     }
     fn restart(&mut self, m: u8) {
         // The bits so far end at the marker (padded there when appended).
-        self.before_restarts.push((std::mem::take(&mut self.out), self.acc, self.n, m));
+        self.before_restarts
+            .push((std::mem::take(&mut self.out), self.acc, self.n, m));
         self.acc = 0;
         self.n = 0;
     }
@@ -132,7 +133,8 @@ impl Sink for Writer<'_> {
             self.missing = true;
         }
         let value = value & ((1u32 << n) - 1);
-        self.w.put((u32::from(code) << n) | value, u32::from(len) + n);
+        self.w
+            .put((u32::from(code) << n) | value, u32::from(len) + n);
     }
     fn restart(&mut self, m: u8) {
         self.w.marker(0xD0 + m);
@@ -150,7 +152,11 @@ fn category(v: i32) -> (u32, u32) {
     }
     let a = v.unsigned_abs();
     let s = 32 - a.leading_zeros();
-    let bits = if v < 0 { (v - 1) as u32 & ((1 << s) - 1) } else { v as u32 };
+    let bits = if v < 0 {
+        (v - 1) as u32 & ((1 << s) - 1)
+    } else {
+        v as u32
+    };
     (s, bits)
 }
 
@@ -163,7 +169,12 @@ const PIECE_MCUS: usize = 1024;
 /// the previous block gives), at restart interval boundaries when it has
 /// them (where the predictions start afresh); a progressive scan is one
 /// piece.
-fn pieces(comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec, progressive: bool) -> Vec<std::ops::Range<usize>> {
+fn pieces(
+    comps: &[CompCoefs],
+    layout: &Layout,
+    scan: &ScanSpec,
+    progressive: bool,
+) -> Vec<std::ops::Range<usize>> {
     let (mx, my) = geometry(comps, layout, scan);
     let total = mx * my;
     let step = match layout.restart {
@@ -173,21 +184,35 @@ fn pieces(comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec, progressive: bo
     if progressive || total <= step {
         return std::iter::once(0..total).collect();
     }
-    (0..total.div_ceil(step)).map(|i| i * step..((i + 1) * step).min(total)).collect()
+    (0..total.div_ceil(step))
+        .map(|i| i * step..((i + 1) * step).min(total))
+        .collect()
 }
 
 /// The optimal tables for one scan: a counting pass over it (in pieces on
 /// several threads where the scan allows, the counts summed).
-pub(super) fn optimal_tables(comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec, progressive: bool) -> Tables {
+pub(super) fn optimal_tables(
+    comps: &[CompCoefs],
+    layout: &Layout,
+    scan: &ScanSpec,
+    progressive: bool,
+) -> Tables {
     let ranges = pieces(comps, layout, scan, progressive);
     let counts = crate::par::map(ranges.len(), layout.threads, |i| {
-        let mut c = Counter { freq: [[[0; 256]; 2]; 2] };
+        let mut c = Counter {
+            freq: [[[0; 256]; 2]; 2],
+        };
         run(&mut c, comps, layout, scan, progressive, ranges[i].clone());
         c.freq
     });
     let mut freq = [[[0u64; 256]; 2]; 2];
     for c in &counts {
-        for (f, c) in freq.as_flattened_mut().as_flattened_mut().iter_mut().zip(c.as_flattened().as_flattened()) {
+        for (f, c) in freq
+            .as_flattened_mut()
+            .as_flattened_mut()
+            .iter_mut()
+            .zip(c.as_flattened().as_flattened())
+        {
             *f += c;
         }
     }
@@ -204,22 +229,42 @@ pub(super) fn encode_scan(
     progressive: bool,
 ) -> Result<()> {
     let codes = [
-        [EncodeTable::new(&tables[0].0)?, EncodeTable::new(&tables[0].1)?],
-        [EncodeTable::new(&tables[1].0)?, EncodeTable::new(&tables[1].1)?],
+        [
+            EncodeTable::new(&tables[0].0)?,
+            EncodeTable::new(&tables[0].1)?,
+        ],
+        [
+            EncodeTable::new(&tables[1].0)?,
+            EncodeTable::new(&tables[1].1)?,
+        ],
     ];
     let ranges = pieces(comps, layout, scan, progressive);
     let mut w = if ranges.len() == 1 {
-        let mut w = Writer { w: BitWriter::new(out), codes, missing: false };
+        let mut w = Writer {
+            w: BitWriter::new(out),
+            codes,
+            missing: false,
+        };
         run(&mut w, comps, layout, scan, progressive, ranges[0].clone());
         w
     } else {
         let parts = crate::par::map(ranges.len(), layout.threads, |i| {
-            let mut r =
-                RawWriter { out: Vec::new(), acc: 0, n: 0, codes: &codes, missing: false, before_restarts: Vec::new() };
+            let mut r = RawWriter {
+                out: Vec::new(),
+                acc: 0,
+                n: 0,
+                codes: &codes,
+                missing: false,
+                before_restarts: Vec::new(),
+            };
             run(&mut r, comps, layout, scan, progressive, ranges[i].clone());
             (r.before_restarts, r.out, r.acc, r.n, r.missing)
         });
-        let mut w = Writer { w: BitWriter::new(out), codes, missing: false };
+        let mut w = Writer {
+            w: BitWriter::new(out),
+            codes,
+            missing: false,
+        };
         for (before_restarts, bytes, acc, n, missing) in parts {
             for (bytes, acc, n, m) in before_restarts {
                 w.append(&bytes, acc, n);
@@ -232,7 +277,9 @@ pub(super) fn encode_scan(
     };
     w.finish();
     if w.missing {
-        return Err(crate::error::invalid("a symbol with no Huffman code (encoder bug)"));
+        return Err(crate::error::invalid(
+            "a symbol with no Huffman code (encoder bug)",
+        ));
     }
     Ok(())
 }
@@ -263,7 +310,9 @@ impl State {
 
 /// The scan's MCUs across and down (blocks, for a single component).
 fn geometry(comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec) -> (usize, usize) {
-    let members: Vec<usize> = (0..comps.len()).filter(|i| scan.comps & (1 << i) != 0).collect();
+    let members: Vec<usize> = (0..comps.len())
+        .filter(|i| scan.comps & (1 << i) != 0)
+        .collect();
     if members.len() == 1 {
         let c = &comps[members[0]];
         (c.units_w, c.units_h)
@@ -276,11 +325,25 @@ fn geometry(comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec) -> (usize, us
 /// scan (only sequential scans are split) takes its DC
 /// predictions from the blocks just before it. Padding and the end of the
 /// scan are left to the caller.
-fn run<S: Sink>(s: &mut S, comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec, progressive: bool, mcus: std::ops::Range<usize>) {
-    let members: Vec<usize> = (0..comps.len()).filter(|i| scan.comps & (1 << i) != 0).collect();
+fn run<S: Sink>(
+    s: &mut S,
+    comps: &[CompCoefs],
+    layout: &Layout,
+    scan: &ScanSpec,
+    progressive: bool,
+    mcus: std::ops::Range<usize>,
+) {
+    let members: Vec<usize> = (0..comps.len())
+        .filter(|i| scan.comps & (1 << i) != 0)
+        .collect();
     let single = members.len() == 1;
     let (mx, _) = geometry(comps, layout, scan);
-    let mut st = State { pred: vec![0; comps.len()], eobrun: 0, be: Vec::new(), slot: comps[members[0]].table };
+    let mut st = State {
+        pred: vec![0; comps.len()],
+        eobrun: 0,
+        be: Vec::new(),
+        slot: comps[members[0]].table,
+    };
     if mcus.start > 0 {
         let (x, y) = ((mcus.start - 1) % mx, (mcus.start - 1) / mx);
         for &ci in &members {
@@ -400,7 +463,10 @@ fn ac_first<S: Sink>(s: &mut S, st: &mut State, scan: &ScanSpec, blk: &[i16; 64]
 
 /// G.1.2.3 (Figure G.7): a refinement scan of a band.
 fn ac_refine<S: Sink>(s: &mut S, st: &mut State, scan: &ScanSpec, blk: &[i16; 64]) {
-    let abs: Vec<u32> = blk[scan.ss..=scan.se].iter().map(|&c| (i32::from(c).unsigned_abs()) >> scan.al).collect();
+    let abs: Vec<u32> = blk[scan.ss..=scan.se]
+        .iter()
+        .map(|&c| (i32::from(c).unsigned_abs()) >> scan.al)
+        .collect();
     // EOB: the position after the last coefficient that becomes non-zero in
     // this scan.
     let eob = abs.iter().rposition(|&a| a == 1).map_or(0, |p| p + 1);

@@ -46,13 +46,27 @@ fn tables() -> &'static Tables {
         let mut m = [[0f32; 8]; 8];
         for (x, row) in m.iter_mut().enumerate() {
             for (u, v) in row.iter_mut().enumerate() {
-                let c = if u == 0 { std::f64::consts::FRAC_1_SQRT_2 } else { 1.0 };
-                *v = (c / 2.0 * (((2 * x + 1) * u) as f64 * std::f64::consts::PI / 16.0).cos()) as f32;
+                let c = if u == 0 {
+                    std::f64::consts::FRAC_1_SQRT_2
+                } else {
+                    1.0
+                };
+                *v = (c / 2.0 * (((2 * x + 1) * u) as f64 * std::f64::consts::PI / 16.0).cos())
+                    as f32;
             }
         }
-        let even = std::array::from_fn(|k| std::array::from_fn(|x| if x < 4 { m[x][2 * k] } else { m[7 - x][2 * k] }));
-        let odd =
-            std::array::from_fn(|k| std::array::from_fn(|x| if x < 4 { m[x][2 * k + 1] } else { -m[7 - x][2 * k + 1] }));
+        let even = std::array::from_fn(|k| {
+            std::array::from_fn(|x| if x < 4 { m[x][2 * k] } else { m[7 - x][2 * k] })
+        });
+        let odd = std::array::from_fn(|k| {
+            std::array::from_fn(|x| {
+                if x < 4 {
+                    m[x][2 * k + 1]
+                } else {
+                    -m[7 - x][2 * k + 1]
+                }
+            })
+        });
         let fwd = std::array::from_fn(|x| m[x]);
         Tables { m, even, odd, fwd }
     })
@@ -91,16 +105,34 @@ fn idct_lanes(coef: &[i32; 64]) -> [Lanes; 8] {
     let mut tmp = [[0f32; 8]; 8];
     for y in 0..4 {
         let r = &m[y];
-        let even = add(add(add(scale(r[0], f[0]), scale(r[2], f[2])), scale(r[4], f[4])), scale(r[6], f[6]));
-        let odd = add(add(add(scale(r[1], f[1]), scale(r[3], f[3])), scale(r[5], f[5])), scale(r[7], f[7]));
+        let even = add(
+            add(add(scale(r[0], f[0]), scale(r[2], f[2])), scale(r[4], f[4])),
+            scale(r[6], f[6]),
+        );
+        let odd = add(
+            add(add(scale(r[1], f[1]), scale(r[3], f[3])), scale(r[5], f[5])),
+            scale(r[7], f[7]),
+        );
         tmp[y] = add(even, odd);
         tmp[7 - y] = sub(even, odd);
     }
     // Rows: lane x is output column x.
     let mut out = [[0f32; 8]; 8];
     for (o, r) in out.iter_mut().zip(&tmp) {
-        let even = add(add(add(scale(r[0], t.even[0]), scale(r[2], t.even[1])), scale(r[4], t.even[2])), scale(r[6], t.even[3]));
-        let odd = add(add(add(scale(r[1], t.odd[0]), scale(r[3], t.odd[1])), scale(r[5], t.odd[2])), scale(r[7], t.odd[3]));
+        let even = add(
+            add(
+                add(scale(r[0], t.even[0]), scale(r[2], t.even[1])),
+                scale(r[4], t.even[2]),
+            ),
+            scale(r[6], t.even[3]),
+        );
+        let odd = add(
+            add(
+                add(scale(r[1], t.odd[0]), scale(r[3], t.odd[1])),
+                scale(r[5], t.odd[2]),
+            ),
+            scale(r[7], t.odd[3]),
+        );
         *o = add(even, odd);
     }
     out
@@ -119,7 +151,13 @@ pub(crate) fn idct(coef: &[i32; 64]) -> [f32; 64] {
 
 /// Inverse DCT to samples: rounds, adds `level` (2^(P-1)) and clamps to
 /// `0..=max`, writing 8 rows of 8 into `dst` at `stride`.
-pub(crate) fn idct_to_samples(coef: &[i32; 64], level: i32, max: i32, dst: &mut [u16], stride: usize) {
+pub(crate) fn idct_to_samples(
+    coef: &[i32; 64],
+    level: i32,
+    max: i32,
+    dst: &mut [u16],
+    stride: usize,
+) {
     // A block with only its DC term is flat.
     if coef[1..].iter().all(|&c| c == 0) {
         let v = ((coef[0] as f32) / 8.0).round() as i32 + level;
@@ -155,14 +193,26 @@ fn fdct_lanes(s: &[f32; 64]) -> [Lanes; 8] {
             let (sum, diff) = (f[x] + f[7 - x], f[x] - f[7 - x]);
             std::array::from_fn(|u| if u % 2 == 0 { sum } else { diff })
         });
-        *o = add(add(add(mul(t.fwd[0], src[0]), mul(t.fwd[1], src[1])), mul(t.fwd[2], src[2])), mul(t.fwd[3], src[3]));
+        *o = add(
+            add(
+                add(mul(t.fwd[0], src[0]), mul(t.fwd[1], src[1])),
+                mul(t.fwd[2], src[2]),
+            ),
+            mul(t.fwd[3], src[3]),
+        );
     }
     // Columns: lane u is column u.
     let sum: [Lanes; 4] = std::array::from_fn(|x| add(tmp[x], tmp[7 - x]));
     let diff: [Lanes; 4] = std::array::from_fn(|x| sub(tmp[x], tmp[7 - x]));
     std::array::from_fn(|v| {
         let src = if v % 2 == 0 { &sum } else { &diff };
-        add(add(add(scale(m[0][v], src[0]), scale(m[1][v], src[1])), scale(m[2][v], src[2])), scale(m[3][v], src[3]))
+        add(
+            add(
+                add(scale(m[0][v], src[0]), scale(m[1][v], src[1])),
+                scale(m[2][v], src[2]),
+            ),
+            scale(m[3][v], src[3]),
+        )
     })
 }
 
@@ -314,12 +364,23 @@ mod tests {
                     *v = r.range(lo, hi);
                 }
             }
-            assert_eq!(bits(&idct(&c)), bits(&idct_reference(&c)), "idct trial {trial}");
-            let s: [f32; 64] = std::array::from_fn(|_| r.range(-2048, 2047) as f32 + (r.range(0, 3) as f32) * 0.25);
-            assert_eq!(bits(&fdct(&s)), bits(&fdct_reference(&s)), "fdct trial {trial}");
+            assert_eq!(
+                bits(&idct(&c)),
+                bits(&idct_reference(&c)),
+                "idct trial {trial}"
+            );
+            let s: [f32; 64] = std::array::from_fn(|_| {
+                r.range(-2048, 2047) as f32 + (r.range(0, 3) as f32) * 0.25
+            });
+            assert_eq!(
+                bits(&fdct(&s)),
+                bits(&fdct_reference(&s)),
+                "fdct trial {trial}"
+            );
             let q: [u16; 64] = std::array::from_fn(|_| r.range(1, 255) as u16);
             let want = fdct_reference(&s);
-            let want: [i16; 64] = std::array::from_fn(|n| (want[n] / f32::from(q[n])).round() as i16);
+            let want: [i16; 64] =
+                std::array::from_fn(|n| (want[n] / f32::from(q[n])).round() as i16);
             assert_eq!(fdct_quantise(&s, &q), want, "quantise trial {trial}");
         }
         // Ties: values exactly halfway round away from zero.

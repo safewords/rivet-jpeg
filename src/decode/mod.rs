@@ -135,7 +135,11 @@ pub struct DecodeOptions {
 
 impl Default for DecodeOptions {
     fn default() -> Self {
-        Self { max_pixels: Some(1 << 28), strict: false, threads: 0 }
+        Self {
+            max_pixels: Some(1 << 28),
+            strict: false,
+            threads: 0,
+        }
     }
 }
 
@@ -180,7 +184,14 @@ pub struct Image {
 
 /// The headers only: everything up to the first scan, without decoding.
 pub fn read_info(data: &[u8]) -> Result<Info> {
-    let mut d = Decoder::new(data, DecodeOptions { max_pixels: None, strict: false, threads: 1 });
+    let mut d = Decoder::new(
+        data,
+        DecodeOptions {
+            max_pixels: None,
+            strict: false,
+            threads: 1,
+        },
+    );
     d.run(true)?;
     d.info()
 }
@@ -378,7 +389,10 @@ impl<'a> Decoder<'a> {
             if self.pos != start {
                 // Fill bytes alone are fine; anything else is not.
                 if self.data[start..self.pos].iter().any(|&b| b != 0xFF) {
-                    self.warn(format!("{} bytes of data between marker segments", self.pos - start))?;
+                    self.warn(format!(
+                        "{} bytes of data between marker segments",
+                        self.pos - start
+                    ))?;
                 }
             }
             self.pos += 2;
@@ -391,7 +405,10 @@ impl<'a> Decoder<'a> {
         if self.pos + 2 > self.data.len() {
             return Ok(None);
         }
-        let len = usize::from(u16::from_be_bytes([self.data[self.pos], self.data[self.pos + 1]]));
+        let len = usize::from(u16::from_be_bytes([
+            self.data[self.pos],
+            self.data[self.pos + 1],
+        ]));
         if len < 2 {
             return Err(invalid("a marker segment length below 2"));
         }
@@ -413,7 +430,9 @@ impl<'a> Decoder<'a> {
         loop {
             let Some(m) = self.next_marker()? else {
                 if self.frame.is_none() || self.scans == 0 {
-                    return Err(Error::Truncated("the data ends before the first scan".into()));
+                    return Err(Error::Truncated(
+                        "the data ends before the first scan".into(),
+                    ));
                 }
                 if !self.seen_eoi {
                     // Without EOI, a progressive picture may be missing
@@ -451,7 +470,9 @@ impl<'a> Decoder<'a> {
                     }
                     let Some(p) = self.segment()? else {
                         if self.scans == 0 {
-                            return Err(Error::Truncated("the data ends in the first scan header".into()));
+                            return Err(Error::Truncated(
+                                "the data ends in the first scan header".into(),
+                            ));
                         }
                         self.complete = false;
                         self.warn("the data ends in a scan header")?;
@@ -471,7 +492,9 @@ impl<'a> Decoder<'a> {
                 _ => {
                     let Some(p) = self.segment()? else {
                         if self.frame.is_none() || self.scans == 0 {
-                            return Err(Error::Truncated(format!("the data ends in a marker segment (0xFF{m:02X})")));
+                            return Err(Error::Truncated(format!(
+                                "the data ends in a marker segment (0xFF{m:02X})"
+                            )));
                         }
                         self.complete = false;
                         self.warn("the data ends in a marker segment")?;
@@ -542,7 +565,12 @@ impl<'a> Decoder<'a> {
             0xC9 => (false, false, true),
             0xCA => (true, false, true),
             0xCB => (false, true, true),
-            _ => return Err(unsupported(format!("differential frames (SOF{}), the hierarchical mode", m - 0xC0))),
+            _ => {
+                return Err(unsupported(format!(
+                    "differential frames (SOF{}), the hierarchical mode",
+                    m - 0xC0
+                )));
+            }
         };
         self.baseline = m == 0xC0;
         if p.len() < 6 {
@@ -553,7 +581,9 @@ impl<'a> Decoder<'a> {
         let width = usize::from(u16::from_be_bytes([p[3], p[4]]));
         let nf = usize::from(p[5]);
         if p.len() != 6 + 3 * nf {
-            return Err(invalid("frame header length does not match its component count"));
+            return Err(invalid(
+                "frame header length does not match its component count",
+            ));
         }
         let ok_precision = if lossless {
             (2..=16).contains(&precision)
@@ -563,7 +593,10 @@ impl<'a> Decoder<'a> {
             precision == 8 || precision == 12
         };
         if !ok_precision {
-            return Err(invalid(format!("sample precision {precision} for SOF{}", m - 0xC0)));
+            return Err(invalid(format!(
+                "sample precision {precision} for SOF{}",
+                m - 0xC0
+            )));
         }
         if nf == 0 || (progressive && nf > 4) {
             return Err(invalid(format!("{nf} components in the frame")));
@@ -572,17 +605,27 @@ impl<'a> Decoder<'a> {
             return Err(invalid("a frame of width 0"));
         }
         if height == 0 {
-            height = self.find_dnl().ok_or_else(|| invalid("height 0 in the frame header and no DNL segment"))?;
+            height = self
+                .find_dnl()
+                .ok_or_else(|| invalid("height 0 in the frame header and no DNL segment"))?;
         }
         if let Some(limit) = self.opts.max_pixels
             && (width as u64) * (height as u64) > limit
         {
-            return Err(Error::TooLarge { width: width as u32, height: height as u32, limit });
+            return Err(Error::TooLarge {
+                width: width as u32,
+                height: height as u32,
+                limit,
+            });
         }
         let mut comps = Vec::with_capacity(nf);
         for i in 0..nf {
             let c = &p[6 + 3 * i..9 + 3 * i];
-            let (h, v, tq) = (usize::from(c[1] >> 4), usize::from(c[1] & 15), usize::from(c[2]));
+            let (h, v, tq) = (
+                usize::from(c[1] >> 4),
+                usize::from(c[1] & 15),
+                usize::from(c[2]),
+            );
             if !(1..=4).contains(&h) || !(1..=4).contains(&v) {
                 return Err(invalid(format!("sampling factors {h}x{v}")));
             }
@@ -620,14 +663,33 @@ impl<'a> Decoder<'a> {
             c.stride = mcus_x * c.h * unit;
             c.rows = mcus_y * c.v * unit;
         }
-        let frame = Frame { sof: m, precision, width, height, comps, mcus_x, mcus_y, progressive, lossless, arithmetic };
+        let frame = Frame {
+            sof: m,
+            precision,
+            width,
+            height,
+            comps,
+            mcus_x,
+            mcus_y,
+            progressive,
+            lossless,
+            arithmetic,
+        };
         // Allocate: planes (mid-grey, so missing data shows as grey), and
         // the coefficient store of a DCT frame (transformed after the last
         // scan).
         let mid = if lossless { 0 } else { 1u16 << (precision - 1) };
-        self.planes = frame.comps.iter().map(|c| vec![mid; c.stride * c.rows]).collect();
+        self.planes = frame
+            .comps
+            .iter()
+            .map(|c| vec![mid; c.stride * c.rows])
+            .collect();
         if !lossless {
-            self.coefs = frame.comps.iter().map(|c| vec![0i16; c.stride * c.rows]).collect();
+            self.coefs = frame
+                .comps
+                .iter()
+                .map(|c| vec![0i16; c.stride * c.rows])
+                .collect();
         }
         self.comp_quant = vec![None; frame.comps.len()];
         self.progression = vec![[-1i8; 64]; frame.comps.len()];
@@ -658,7 +720,9 @@ impl<'a> Decoder<'a> {
             }
             let (tc, th) = (p[0] >> 4, usize::from(p[0] & 15));
             if tc > 1 || th > 3 {
-                return Err(invalid(format!("Huffman table class {tc}, destination {th}")));
+                return Err(invalid(format!(
+                    "Huffman table class {tc}, destination {th}"
+                )));
             }
             if self.baseline && th > 1 {
                 self.warn("a baseline frame with a Huffman table in destination 2 or 3")?;
@@ -688,7 +752,9 @@ impl<'a> Decoder<'a> {
         while !p.is_empty() {
             let (pq, tq) = (p[0] >> 4, usize::from(p[0] & 15));
             if pq > 1 || tq > 3 {
-                return Err(invalid(format!("quantisation table precision {pq}, destination {tq}")));
+                return Err(invalid(format!(
+                    "quantisation table precision {pq}, destination {tq}"
+                )));
             }
             let size = if pq == 0 { 64 } else { 128 };
             if p.len() < 1 + size {
@@ -696,7 +762,11 @@ impl<'a> Decoder<'a> {
             }
             let mut q = [0u16; 64];
             for k in 0..64 {
-                let v = if pq == 0 { u16::from(p[1 + k]) } else { u16::from_be_bytes([p[1 + 2 * k], p[2 + 2 * k]]) };
+                let v = if pq == 0 {
+                    u16::from(p[1 + k])
+                } else {
+                    u16::from_be_bytes([p[1 + 2 * k], p[2 + 2 * k]])
+                };
                 if v == 0 {
                     self.warn("a quantisation table entry of 0")?;
                 }
@@ -718,7 +788,9 @@ impl<'a> Decoder<'a> {
         for c in p.as_chunks::<2>().0 {
             let (tc, tb, cs) = (c[0] >> 4, usize::from(c[0] & 15), c[1]);
             if tc > 1 || tb > 3 {
-                return Err(invalid(format!("arithmetic conditioning class {tc}, destination {tb}")));
+                return Err(invalid(format!(
+                    "arithmetic conditioning class {tc}, destination {tb}"
+                )));
             }
             if tc == 0 {
                 let (l, u) = (cs & 15, cs >> 4);
@@ -737,13 +809,17 @@ impl<'a> Decoder<'a> {
     }
 
     fn parse_sos(&mut self, p: &[u8]) -> Result<Scan> {
-        let Some(frame) = self.frame.clone() else { return Err(invalid("SOS before the frame header")) };
+        let Some(frame) = self.frame.clone() else {
+            return Err(invalid("SOS before the frame header"));
+        };
         if p.is_empty() {
             return Err(invalid("empty scan header"));
         }
         let ns = usize::from(p[0]);
         if !(1..=4).contains(&ns) || p.len() != 4 + 2 * ns {
-            return Err(invalid("scan header length does not match its component count"));
+            return Err(invalid(
+                "scan header length does not match its component count",
+            ));
         }
         let mut comps = Vec::with_capacity(ns);
         for i in 0..ns {
@@ -770,25 +846,53 @@ impl<'a> Decoder<'a> {
         }
         let q = &p[1 + 2 * ns..];
         let (ss, se, ah, al) = (usize::from(q[0]), usize::from(q[1]), q[2] >> 4, q[2] & 15);
-        let blocks: usize = comps.iter().map(|c| frame.comps[c.ci].h * frame.comps[c.ci].v).sum();
+        let blocks: usize = comps
+            .iter()
+            .map(|c| frame.comps[c.ci].h * frame.comps[c.ci].v)
+            .sum();
         if ns > 1 && blocks > 10 {
-            return Err(invalid(format!("{blocks} data units in an MCU (at most 10)")));
+            return Err(invalid(format!(
+                "{blocks} data units in an MCU (at most 10)"
+            )));
         }
         if frame.lossless {
             if !(1..=7).contains(&ss) {
                 return Err(invalid(format!("lossless predictor {ss}")));
             }
             if al >= frame.precision {
-                return Err(invalid(format!("lossless point transform {al} at precision {}", frame.precision)));
+                return Err(invalid(format!(
+                    "lossless point transform {al} at precision {}",
+                    frame.precision
+                )));
             }
         } else if frame.progressive {
-            if ss > se || se > 63 || (ss == 0 && se != 0) || (ss > 0 && ns != 1) || ah > 13 || al > 13 {
-                return Err(invalid(format!("progressive scan Ss={ss} Se={se} Ah={ah} Al={al} with {ns} components")));
+            if ss > se
+                || se > 63
+                || (ss == 0 && se != 0)
+                || (ss > 0 && ns != 1)
+                || ah > 13
+                || al > 13
+            {
+                return Err(invalid(format!(
+                    "progressive scan Ss={ss} Se={se} Ah={ah} Al={al} with {ns} components"
+                )));
             }
         } else if ss != 0 || se != 63 || ah != 0 || al != 0 {
-            self.warn(format!("sequential scan with Ss={ss} Se={se} Ah={ah} Al={al}"))?;
+            self.warn(format!(
+                "sequential scan with Ss={ss} Se={se} Ah={ah} Al={al}"
+            ))?;
         }
-        let scan = Scan { comps, ss, se: if frame.progressive || frame.lossless { se } else { 63 }, ah, al };
+        let scan = Scan {
+            comps,
+            ss,
+            se: if frame.progressive || frame.lossless {
+                se
+            } else {
+                63
+            },
+            ah,
+            al,
+        };
         Ok(scan)
     }
 
@@ -799,14 +903,22 @@ impl<'a> Decoder<'a> {
             let state = &mut self.progression[sc.ci];
             for k in scan.ss..=scan.se {
                 let prev = state[k];
-                let ok = if scan.ah == 0 { prev == -1 } else { prev >= 0 && prev as u8 == scan.ah && scan.al + 1 == scan.ah };
+                let ok = if scan.ah == 0 {
+                    prev == -1
+                } else {
+                    prev >= 0 && prev as u8 == scan.ah && scan.al + 1 == scan.ah
+                };
                 if !ok {
                     problems.push(format!(
                         "component {} coefficient {k}: Ah={} Al={} after {}",
                         sc.ci,
                         scan.ah,
                         scan.al,
-                        if prev < 0 { "no scan".to_string() } else { format!("Al={prev}") }
+                        if prev < 0 {
+                            "no scan".to_string()
+                        } else {
+                            format!("Al={prev}")
+                        }
                     ));
                     break;
                 }
@@ -829,7 +941,9 @@ impl<'a> Decoder<'a> {
         for sc in &scan.comps {
             let fc = &frame.comps[sc.ci];
             if !frame.lossless {
-                let q = self.tables.quant[fc.tq].ok_or_else(|| invalid(format!("quantisation table {} is not defined", fc.tq)))?;
+                let q = self.tables.quant[fc.tq].ok_or_else(|| {
+                    invalid(format!("quantisation table {} is not defined", fc.tq))
+                })?;
                 if self.comp_quant[sc.ci].is_none() {
                     self.comp_quant[sc.ci] = Some(q);
                 }
@@ -838,10 +952,16 @@ impl<'a> Decoder<'a> {
                 let need_dc = frame.lossless || scan.ss == 0 && scan.ah == 0;
                 let need_ac = !frame.lossless && scan.se > 0;
                 if need_dc && self.tables.dc[sc.td].is_none() {
-                    return Err(invalid(format!("Huffman DC table {} is not defined", sc.td)));
+                    return Err(invalid(format!(
+                        "Huffman DC table {} is not defined",
+                        sc.td
+                    )));
                 }
                 if need_ac && self.tables.ac[sc.ta].is_none() {
-                    return Err(invalid(format!("Huffman AC table {} is not defined", sc.ta)));
+                    return Err(invalid(format!(
+                        "Huffman AC table {} is not defined",
+                        sc.ta
+                    )));
                 }
                 if self.baseline && (sc.td > 1 || sc.ta > 1) {
                     self.warn("a baseline scan selecting Huffman table 2 or 3")?;
@@ -863,7 +983,10 @@ impl<'a> Decoder<'a> {
     }
 
     fn info(&mut self) -> Result<Info> {
-        let frame = self.frame.as_ref().ok_or_else(|| invalid("no frame header"))?;
+        let frame = self
+            .frame
+            .as_ref()
+            .ok_or_else(|| invalid("no frame header"))?;
         let icc = match self.icc.assemble() {
             Ok(p) => p,
             Err(e) => {
@@ -881,7 +1004,11 @@ impl<'a> Decoder<'a> {
                 if self.jfif.is_some() {
                     ColourSpace::YCbCr
                 } else if let Some(a) = self.adobe {
-                    if a.transform == 0 { ColourSpace::Rgb } else { ColourSpace::YCbCr }
+                    if a.transform == 0 {
+                        ColourSpace::Rgb
+                    } else {
+                        ColourSpace::YCbCr
+                    }
                 } else if ids == b"RGB" || ids == b"rgb" {
                     ColourSpace::Rgb
                 } else {
@@ -911,7 +1038,11 @@ impl<'a> Decoder<'a> {
             height: frame.height as u32,
             precision: frame.precision,
             process,
-            coding: if frame.arithmetic { Coding::Arithmetic } else { Coding::Huffman },
+            coding: if frame.arithmetic {
+                Coding::Arithmetic
+            } else {
+                Coding::Huffman
+            },
             sof_marker: frame.sof,
             components: frame
                 .comps
@@ -939,19 +1070,37 @@ impl<'a> Decoder<'a> {
     }
 
     fn finish(mut self) -> Result<Image> {
-        let frame = self.frame.clone().ok_or_else(|| invalid("no frame header"))?;
+        let frame = self
+            .frame
+            .clone()
+            .ok_or_else(|| invalid("no frame header"))?;
         if !frame.lossless {
             scan::idct_all(&mut self, &frame);
         }
         if self.opts.strict && !self.complete {
-            return Err(invalid(self.warnings.first().cloned().unwrap_or_else(|| "incomplete".into())));
+            return Err(invalid(
+                self.warnings
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "incomplete".into()),
+            ));
         }
         let info = self.info()?;
         let planes = std::mem::take(&mut self.planes)
             .into_iter()
             .zip(&frame.comps)
-            .map(|(data, c)| Plane { width: c.width, height: c.height, stride: c.stride, data })
+            .map(|(data, c)| Plane {
+                width: c.width,
+                height: c.height,
+                stride: c.stride,
+                data,
+            })
             .collect();
-        Ok(Image { info, planes, complete: self.complete, warnings: self.warnings })
+        Ok(Image {
+            info,
+            planes,
+            complete: self.complete,
+            warnings: self.warnings,
+        })
     }
 }

@@ -47,9 +47,17 @@ impl Axis {
             && taps[1..taps.len() - 1].iter().enumerate().all(|(i, &t)| {
                 let x = i + 1;
                 let k = ((x - 1) / 2) as u32;
-                t == if x % 2 == 1 { (k, k + 1, 3, 1) } else { (k, k + 1, 1, 3) }
+                t == if x % 2 == 1 {
+                    (k, k + 1, 3, 1)
+                } else {
+                    (k, k + 1, 1, 3)
+                }
             });
-        Self { taps, denom, halves }
+        Self {
+            taps,
+            denom,
+            halves,
+        }
     }
 }
 
@@ -68,17 +76,37 @@ impl<'a> Rows<'a> {
     pub(crate) fn new(img: &'a Image) -> Self {
         let info = &img.info;
         let (w, h) = (info.width as usize, info.height as usize);
-        let hmax = info.components.iter().map(|c| usize::from(c.h)).max().unwrap_or(1);
-        let vmax = info.components.iter().map(|c| usize::from(c.v)).max().unwrap_or(1);
+        let hmax = info
+            .components
+            .iter()
+            .map(|c| usize::from(c.h))
+            .max()
+            .unwrap_or(1);
+        let vmax = info
+            .components
+            .iter()
+            .map(|c| usize::from(c.v))
+            .max()
+            .unwrap_or(1);
         let mut axes = Vec::new();
         let mut identity = Vec::new();
         for (c, p) in info.components.iter().zip(&img.planes) {
             let (ch, cv) = (usize::from(c.h), usize::from(c.v));
             identity.push(ch == hmax && cv == vmax);
-            axes.push((Axis::new(w, p.width, ch, hmax), Axis::new(h, p.height, cv, vmax)));
+            axes.push((
+                Axis::new(w, p.width, ch, hmax),
+                Axis::new(h, p.height, cv, vmax),
+            ));
         }
         let cols = vec![0; img.planes.iter().map(|p| p.width).max().unwrap_or(0)];
-        Self { planes: &img.planes, axes, identity, lines: vec![vec![0; w]; img.planes.len()], cols, width: w }
+        Self {
+            planes: &img.planes,
+            axes,
+            identity,
+            lines: vec![vec![0; w]; img.planes.len()],
+            cols,
+            width: w,
+        }
     }
 
     /// Line `y` of every component, at full resolution.
@@ -152,15 +180,21 @@ enum Transform {
     YCbCr,
     Rgb,
     /// CMYK; `inverted` when stored as Adobe applications store it.
-    Cmyk { inverted: bool },
-    Ycck { inverted: bool },
+    Cmyk {
+        inverted: bool,
+    },
+    Ycck {
+        inverted: bool,
+    },
 }
 
 fn transform(img: &Image) -> Transform {
     let adobe = img.info.adobe.is_some();
     match img.info.colour_space {
         ColourSpace::Grey | ColourSpace::Other => Transform::Grey,
-        ColourSpace::YCbCr if img.info.process == Process::Lossless && img.info.jfif.is_none() && !adobe => {
+        ColourSpace::YCbCr
+            if img.info.process == Process::Lossless && img.info.jfif.is_none() && !adobe =>
+        {
             Transform::Rgb
         }
         ColourSpace::YCbCr => Transform::YCbCr,
@@ -246,7 +280,8 @@ impl Image {
                 Transform::YCbCr if self.info.precision <= 12 => {
                     let (c, m) = (centre as i32, max as i32);
                     crate::simd::with_wide_vectors(|| {
-                        for (((o, &y), &cb), &cr) in rgb.iter_mut().zip(&l[0]).zip(&l[1]).zip(&l[2]) {
+                        for (((o, &y), &cb), &cr) in rgb.iter_mut().zip(&l[0]).zip(&l[1]).zip(&l[2])
+                        {
                             let v = ycc_to_rgb32(i32::from(y), i32::from(cb), i32::from(cr), c, m);
                             *o = v.map(|v| v as u16);
                         }
@@ -254,7 +289,13 @@ impl Image {
                 }
                 Transform::YCbCr => {
                     for x in 0..w {
-                        let c = ycc_to_rgb(i64::from(l[0][x]), i64::from(l[1][x]), i64::from(l[2][x]), centre, max);
+                        let c = ycc_to_rgb(
+                            i64::from(l[0][x]),
+                            i64::from(l[1][x]),
+                            i64::from(l[2][x]),
+                            centre,
+                            max,
+                        );
                         rgb[x] = c.map(|v| v as u16);
                     }
                 }
@@ -359,7 +400,11 @@ impl Image {
                 let mut out = Vec::with_capacity(w * h);
                 self.rgb_lines(|_, line| {
                     for p in line {
-                        let l = (19595 * u64::from(p[0]) + 38470 * u64::from(p[1]) + 7471 * u64::from(p[2]) + 32768) >> 16;
+                        let l = (19595 * u64::from(p[0])
+                            + 38470 * u64::from(p[1])
+                            + 7471 * u64::from(p[2])
+                            + 32768)
+                            >> 16;
                         out.push(scale.apply(l as u16) as u8);
                     }
                 });
@@ -399,8 +444,20 @@ impl Image {
 /// result is then in the same convention as an untransformed CMYK file from
 /// the same writer (inverted, when there is an Adobe segment).
 #[inline]
-fn cmyk_ink(l: &[Vec<u16>], x: usize, ycck: bool, inverted: bool, centre: i64, max: i64) -> [i64; 4] {
-    let mut v = [i64::from(l[0][x]), i64::from(l[1][x]), i64::from(l[2][x]), i64::from(l[3][x])];
+fn cmyk_ink(
+    l: &[Vec<u16>],
+    x: usize,
+    ycck: bool,
+    inverted: bool,
+    centre: i64,
+    max: i64,
+) -> [i64; 4] {
+    let mut v = [
+        i64::from(l[0][x]),
+        i64::from(l[1][x]),
+        i64::from(l[2][x]),
+        i64::from(l[3][x]),
+    ];
     if ycck {
         let rgb = ycc_to_rgb(v[0], v[1], v[2], centre, max);
         v[0] = max - rgb[0];
@@ -422,7 +479,10 @@ struct Scale {
 
 impl Scale {
     fn new(from_bits: u8, to_bits: u8) -> Self {
-        Self { from_max: (1u32 << from_bits) - 1, to_max: (1u32 << to_bits) - 1 }
+        Self {
+            from_max: (1u32 << from_bits) - 1,
+            to_max: (1u32 << to_bits) - 1,
+        }
     }
 
     #[inline]
@@ -430,7 +490,8 @@ impl Scale {
         if self.from_max == self.to_max {
             return u32::from(v);
         }
-        ((u64::from(v) * u64::from(self.to_max) + u64::from(self.from_max / 2)) / u64::from(self.from_max)) as u32
+        ((u64::from(v) * u64::from(self.to_max) + u64::from(self.from_max / 2))
+            / u64::from(self.from_max)) as u32
     }
 }
 
@@ -443,8 +504,18 @@ mod tests {
     fn reference_line(img: &Image, y: usize) -> Vec<Vec<u16>> {
         let info = &img.info;
         let (w, h) = (info.width as usize, info.height as usize);
-        let hmax = info.components.iter().map(|c| usize::from(c.h)).max().unwrap_or(1);
-        let vmax = info.components.iter().map(|c| usize::from(c.v)).max().unwrap_or(1);
+        let hmax = info
+            .components
+            .iter()
+            .map(|c| usize::from(c.h))
+            .max()
+            .unwrap_or(1);
+        let vmax = info
+            .components
+            .iter()
+            .map(|c| usize::from(c.v))
+            .max()
+            .unwrap_or(1);
         let mut out = Vec::new();
         for (c, p) in info.components.iter().zip(&img.planes) {
             let (ch, cv) = (usize::from(c.h), usize::from(c.v));
@@ -452,7 +523,10 @@ mod tests {
                 out.push(p.data[y * p.stride..y * p.stride + w].to_vec());
                 continue;
             }
-            let (ax, ay) = (Axis::new(w, p.width, ch, hmax), Axis::new(h, p.height, cv, vmax));
+            let (ax, ay) = (
+                Axis::new(w, p.width, ch, hmax),
+                Axis::new(h, p.height, cv, vmax),
+            );
             let (j0, j1, v0, v1) = ay.taps[y];
             let r0 = &p.data[j0 as usize * p.stride..];
             let r1 = &p.data[j1 as usize * p.stride..];
@@ -462,8 +536,10 @@ mod tests {
                     .iter()
                     .map(|&(i0, i1, w0, w1)| {
                         let (i0, i1) = (i0 as usize, i1 as usize);
-                        let top = u64::from(r0[i0]) * u64::from(w0) + u64::from(r0[i1]) * u64::from(w1);
-                        let bottom = u64::from(r1[i0]) * u64::from(w0) + u64::from(r1[i1]) * u64::from(w1);
+                        let top =
+                            u64::from(r0[i0]) * u64::from(w0) + u64::from(r0[i1]) * u64::from(w1);
+                        let bottom =
+                            u64::from(r1[i0]) * u64::from(w0) + u64::from(r1[i1]) * u64::from(w1);
                         ((top * u64::from(v0) + bottom * u64::from(v1) + d / 2) / d) as u16
                     })
                     .collect(),
@@ -474,7 +550,9 @@ mod tests {
 
     #[test]
     fn upsampling_matches_the_reference() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("corpus");
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("corpus");
         let mut files: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
             .chain(std::fs::read_dir(dir.join("gen")).unwrap())
@@ -505,7 +583,12 @@ mod tests {
                 }
                 let mut rows = Rows::new(&img);
                 for y in 0..img.info.height as usize {
-                    assert_eq!(rows.line(y), &reference_line(&img, y)[..], "{} line {y}", f.display());
+                    assert_eq!(
+                        rows.line(y),
+                        &reference_line(&img, y)[..],
+                        "{} line {y}",
+                        f.display()
+                    );
                 }
             }
         }

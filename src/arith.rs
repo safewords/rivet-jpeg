@@ -32,7 +32,15 @@ pub(crate) struct ArithDecoder<'a> {
 impl<'a> ArithDecoder<'a> {
     /// Initdec (Figure D.22), the segment starting at `pos`.
     pub(crate) fn new(data: &'a [u8], pos: usize) -> Self {
-        let mut d = Self { data, pos, c: 0, a: 0, ct: 0, marker: None, eof_bytes: 0 };
+        let mut d = Self {
+            data,
+            pos,
+            c: 0,
+            a: 0,
+            ct: 0,
+            marker: None,
+            eof_bytes: 0,
+        };
         d.init();
         d
     }
@@ -203,7 +211,14 @@ pub(crate) struct ArithEncoder<'a> {
 impl<'a> ArithEncoder<'a> {
     /// Initenc (Figure D.13).
     pub(crate) fn new(out: &'a mut Vec<u8>) -> Self {
-        Self { out, c: 0, a: 0x10000, ct: 11, st: 0, b: None }
+        Self {
+            out,
+            c: 0,
+            a: 0x10000,
+            ct: 11,
+            st: 0,
+            b: None,
+        }
     }
 
     pub(crate) fn encode(&mut self, s: &mut Context, bit: bool) {

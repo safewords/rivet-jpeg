@@ -22,7 +22,15 @@ pub(crate) struct BitReader<'a> {
 
 impl<'a> BitReader<'a> {
     pub(crate) fn new(data: &'a [u8], pos: usize) -> Self {
-        Self { data, pos, buf: 0, nbits: 0, pad: 0, marker: None, overrun: false }
+        Self {
+            data,
+            pos,
+            buf: 0,
+            nbits: 0,
+            pad: 0,
+            marker: None,
+            overrun: false,
+        }
     }
 
     /// Load bytes until at least `n` (at most 57) bits are buffered.
@@ -120,7 +128,11 @@ impl<'a> BitReader<'a> {
             return 32768;
         }
         let v = self.bits(s) as i32;
-        if v < (1 << (s - 1)) { v - (1 << s) + 1 } else { v }
+        if v < (1 << (s - 1)) {
+            v - (1 << s) + 1
+        } else {
+            v
+        }
     }
 
     /// Whether 0-bits standing in for missing data have been consumed.
@@ -138,7 +150,11 @@ impl<'a> BitReader<'a> {
     /// padded with 1-bits.
     pub(crate) fn leftover(&self) -> (u32, u32) {
         let n = self.nbits.saturating_sub(self.pad);
-        if n == 0 { (0, 0) } else { ((self.buf >> (64 - n)) as u32, n) }
+        if n == 0 {
+            (0, 0)
+        } else {
+            ((self.buf >> (64 - n)) as u32, n)
+        }
     }
 
     /// Discard buffered bits and move to `pos`, for a restart.
