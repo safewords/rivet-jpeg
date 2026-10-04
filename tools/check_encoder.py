@@ -1,9 +1,9 @@
 """Have libjpeg-turbo (a black box, through the imagecodecs and Pillow
-wheels) decode every file `cargo run --example encode_matrix` writes, and
+wheels) decode every file `cargo run --example jpeg_encode_matrix` writes, and
 compare its pixels with this crate's decode of the same file. Prints one
 line per file and a summary. Requires `pip install imagecodecs pillow numpy`.
 
-    cargo run --release --example encode_matrix -- tests/corpus/ijg-testorig.ppm target/matrix
+    cargo run --release --example jpeg_encode_matrix -- tests/corpus/ijg-testorig.ppm target/matrix
     python tools/check_encoder.py target/matrix
 """
 import glob, io, os, sys, warnings

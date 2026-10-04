@@ -1,5 +1,5 @@
 //! Time encoding and decoding a synthetic 4000x3000 picture: `bench`.
-//! `cargo run --release --example bench`.
+//! `cargo run --release --example jpeg_bench`.
 //! Baseline, with restart intervals (every 64 MCUs, which a sequential
 //! scan's decoder spreads over threads) and progressive; decoding on one
 //! thread and on all of them.

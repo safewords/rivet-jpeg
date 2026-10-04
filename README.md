@@ -208,7 +208,7 @@ threads (0: the machine's; 1: the calling thread alone), and
 `Image::to_rgb8_with_threads` the conversion's. Results do not depend on
 the number of threads (`tests/restart_threads.rs`).
 
-On the same machine, `cargo run --release --example bench` (4000x3000,
+On the same machine, `cargo run --release --example jpeg_bench` (4000x3000,
 4:2:0 q85 with grain, 4.5 MB, a restart every 64 MCUs), all threads:
 decode 67 ms before the intervals were parallel, 30 ms after; decode to
 RGB 74 ms, 35 ms. The encoder codes such a scan in pieces of whole
