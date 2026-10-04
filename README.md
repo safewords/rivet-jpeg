@@ -17,7 +17,9 @@ decoder and `jpeg-encoder`. Usable on its own by anything that has JPEG
 bytes and wants pixels, or pixels and wants JPEG.
 
 Published as `rivet-jpeg`; **imported as `jpeg`** (`use jpeg::…`). One
-dependency (`thiserror`), no features, no build script, no `unsafe`.
+dependency (`thiserror`), no build script; `unsafe` only to call code
+compiled for AVX2 once the processor is known to have it
+([`src/simd.rs`](src/simd.rs)), which the `force-scalar` feature turns off.
 
 ```toml
 [dependencies]
@@ -174,6 +176,29 @@ Encoder, the IJG photograph (224x144 crop), bytes and PSNR (RGB):
 **Not checked against T.83.** ITU-T T.83 (the compliance tests) and its
 test data are sold by the ITU, not published; they were not used. The IDCT
 test above is the accuracy test T.83 relies on.
+
+## Speed
+
+Release build, Ryzen 9 9950X, three 1080x720 RGB frames of camera video
+(2.33 megapixels in all), megapixels a second:
+
+| | before | now |
+|---|---|---|
+| decode to RGB, 4:2:0 q85 | 51 | 162 |
+| decode to RGB, 4:4:4 q95 | 37 | 89 |
+| decode to RGB, progressive 4:2:0 | 46 | 106 |
+| encode 4:2:0 q85, optimised tables | 45 | 171 |
+| encode 4:4:4 q95, optimised tables | 25 | 150 |
+| encode progressive 4:2:0 | 26 | 119 |
+
+The transforms and the colour loops are written eight lanes at a time for
+the compiler to vectorise (and built for AVX2 where the processor has it),
+with the same operations in the same order as the one-at-a-time code, so
+the output is identical to the last bit on any processor. The decoder
+transforms all blocks after the entropy-coded data, in rows on several
+threads, and converts to RGB in bands of lines; the encoder prepares rows
+of MCUs, codes a sequential scan in pieces and a progression's scans on
+several threads. Results do not depend on the number of threads.
 
 ## Provenance and licensing
 

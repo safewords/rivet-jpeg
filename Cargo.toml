@@ -22,3 +22,6 @@ thiserror = "2"
 
 [features]
 default = []
+# Compile out the AVX2 variants of the vectorised loops and use only the
+# baseline code; CI tests both.
+force-scalar = []

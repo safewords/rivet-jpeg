@@ -618,10 +618,11 @@ impl<'a> Decoder<'a> {
         }
         let frame = Frame { sof: m, precision, width, height, comps, mcus_x, mcus_y, progressive, lossless, arithmetic };
         // Allocate: planes (mid-grey, so missing data shows as grey), and
-        // the coefficient store of a progressive frame.
+        // the coefficient store of a DCT frame (transformed after the last
+        // scan).
         let mid = if lossless { 0 } else { 1u16 << (precision - 1) };
         self.planes = frame.comps.iter().map(|c| vec![mid; c.stride * c.rows]).collect();
-        if progressive {
+        if !lossless {
             self.coefs = frame.comps.iter().map(|c| vec![0i16; c.stride * c.rows]).collect();
         }
         self.comp_quant = vec![None; frame.comps.len()];
@@ -935,7 +936,7 @@ impl<'a> Decoder<'a> {
 
     fn finish(mut self) -> Result<Image> {
         let frame = self.frame.clone().ok_or_else(|| invalid("no frame header"))?;
-        if frame.progressive {
+        if !frame.lossless {
             scan::idct_all(&mut self, &frame);
         }
         if self.opts.strict && !self.complete {

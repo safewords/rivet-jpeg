@@ -13,6 +13,12 @@ trait Sink {
     fn symbol(&mut self, slot: usize, ac: bool, sym: u8);
     /// Raw bits.
     fn bits(&mut self, value: u32, n: u32);
+    /// A symbol and then `n` (at most 16) raw bits.
+    #[inline]
+    fn symbol_bits(&mut self, slot: usize, ac: bool, sym: u8, value: u32, n: u32) {
+        self.symbol(slot, ac, sym);
+        self.bits(value, n);
+    }
     /// End a restart interval with RSTm.
     fn restart(&mut self, m: u8);
     fn finish(&mut self);
@@ -37,6 +43,71 @@ struct Writer<'a> {
     missing: bool,
 }
 
+/// Bits without byte stuffing, for a piece of a scan coded on its own
+/// thread; [`Writer::append`] stuffs them when the pieces are joined.
+struct RawWriter<'a> {
+    out: Vec<u8>,
+    acc: u64,
+    n: u32,
+    codes: &'a [[EncodeTable; 2]; 2],
+    missing: bool,
+}
+
+impl RawWriter<'_> {
+    #[inline]
+    fn put(&mut self, code: u32, len: u32) {
+        if len == 0 {
+            return;
+        }
+        self.acc = (self.acc << len) | u64::from(code & (((1u64 << len) - 1) as u32));
+        self.n += len;
+        while self.n >= 8 {
+            self.n -= 8;
+            self.out.push((self.acc >> self.n) as u8);
+        }
+        self.acc &= (1u64 << self.n) - 1;
+    }
+}
+
+impl Sink for RawWriter<'_> {
+    #[inline]
+    fn symbol(&mut self, slot: usize, ac: bool, sym: u8) {
+        let (len, code) = self.codes[slot][usize::from(ac)].codes[usize::from(sym)];
+        if len == 0 {
+            self.missing = true;
+        }
+        self.put(u32::from(code), u32::from(len));
+    }
+    #[inline]
+    fn bits(&mut self, value: u32, n: u32) {
+        self.put(value, n);
+    }
+    #[inline]
+    fn symbol_bits(&mut self, slot: usize, ac: bool, sym: u8, value: u32, n: u32) {
+        let (len, code) = self.codes[slot][usize::from(ac)].codes[usize::from(sym)];
+        if len == 0 {
+            self.missing = true;
+        }
+        let value = value & ((1u32 << n) - 1);
+        self.put((u32::from(code) << n) | value, u32::from(len) + n);
+    }
+    fn restart(&mut self, _: u8) {
+        unreachable!("pieces of a scan never hold a restart");
+    }
+    fn finish(&mut self) {}
+}
+
+impl Writer<'_> {
+    /// Appends a piece's bits (whole bytes, then `n` more in `acc`),
+    /// stuffing as they land.
+    fn append(&mut self, bytes: &[u8], acc: u64, n: u32) {
+        for &b in bytes {
+            self.w.put(u32::from(b), 8);
+        }
+        self.w.put(acc as u32, n);
+    }
+}
+
 impl Sink for Writer<'_> {
     fn symbol(&mut self, slot: usize, ac: bool, sym: u8) {
         let (len, code) = self.codes[slot][usize::from(ac)].codes[usize::from(sym)];
@@ -47,6 +118,15 @@ impl Sink for Writer<'_> {
     }
     fn bits(&mut self, value: u32, n: u32) {
         self.w.put(value, n);
+    }
+    #[inline]
+    fn symbol_bits(&mut self, slot: usize, ac: bool, sym: u8, value: u32, n: u32) {
+        let (len, code) = self.codes[slot][usize::from(ac)].codes[usize::from(sym)];
+        if len == 0 {
+            self.missing = true;
+        }
+        let value = value & ((1u32 << n) - 1);
+        self.w.put((u32::from(code) << n) | value, u32::from(len) + n);
     }
     fn restart(&mut self, m: u8) {
         self.w.marker(0xD0 + m);
@@ -68,11 +148,38 @@ fn category(v: i32) -> (u32, u32) {
     (s, bits)
 }
 
-/// The optimal tables for one scan: a counting pass over it.
+/// MCUs per piece when a sequential scan is coded in pieces on several
+/// threads.
+const PIECE_MCUS: usize = 1024;
+
+/// The pieces a scan is coded in: a sequential scan without restart
+/// intervals splits at MCU boundaries (its only state across blocks is the
+/// DC predictions, which the previous block gives); others are one piece.
+fn pieces(comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec, progressive: bool) -> Vec<std::ops::Range<usize>> {
+    let (mx, my) = geometry(comps, layout, scan);
+    let total = mx * my;
+    if progressive || layout.restart > 0 || total <= PIECE_MCUS {
+        return std::iter::once(0..total).collect();
+    }
+    (0..total.div_ceil(PIECE_MCUS)).map(|i| i * PIECE_MCUS..((i + 1) * PIECE_MCUS).min(total)).collect()
+}
+
+/// The optimal tables for one scan: a counting pass over it (in pieces on
+/// several threads where the scan allows, the counts summed).
 pub(super) fn optimal_tables(comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec, progressive: bool) -> Tables {
-    let mut c = Counter { freq: [[[0; 256]; 2]; 2] };
-    run(&mut c, comps, layout, scan, progressive);
-    let t = |slot: usize, ac: usize| optimal_table(&c.freq[slot][ac]);
+    let ranges = pieces(comps, layout, scan, progressive);
+    let counts = crate::par::map(ranges.len(), 0, |i| {
+        let mut c = Counter { freq: [[[0; 256]; 2]; 2] };
+        run(&mut c, comps, layout, scan, progressive, ranges[i].clone());
+        c.freq
+    });
+    let mut freq = [[[0u64; 256]; 2]; 2];
+    for c in &counts {
+        for (f, c) in freq.as_flattened_mut().as_flattened_mut().iter_mut().zip(c.as_flattened().as_flattened()) {
+            *f += c;
+        }
+    }
+    let t = |slot: usize, ac: usize| optimal_table(&freq[slot][ac]);
     [(t(0, 0), t(0, 1)), (t(1, 0), t(1, 1))]
 }
 
@@ -88,8 +195,25 @@ pub(super) fn encode_scan(
         [EncodeTable::new(&tables[0].0)?, EncodeTable::new(&tables[0].1)?],
         [EncodeTable::new(&tables[1].0)?, EncodeTable::new(&tables[1].1)?],
     ];
-    let mut w = Writer { w: BitWriter::new(out), codes, missing: false };
-    run(&mut w, comps, layout, scan, progressive);
+    let ranges = pieces(comps, layout, scan, progressive);
+    let mut w = if ranges.len() == 1 {
+        let mut w = Writer { w: BitWriter::new(out), codes, missing: false };
+        run(&mut w, comps, layout, scan, progressive, ranges[0].clone());
+        w
+    } else {
+        let parts = crate::par::map(ranges.len(), 0, |i| {
+            let mut r = RawWriter { out: Vec::new(), acc: 0, n: 0, codes: &codes, missing: false };
+            run(&mut r, comps, layout, scan, progressive, ranges[i].clone());
+            (r.out, r.acc, r.n, r.missing)
+        });
+        let mut w = Writer { w: BitWriter::new(out), codes, missing: false };
+        for (bytes, acc, n, missing) in parts {
+            w.append(&bytes, acc, n);
+            w.missing |= missing;
+        }
+        w
+    };
+    w.finish();
     if w.missing {
         return Err(crate::error::invalid("a symbol with no Huffman code (encoder bug)"));
     }
@@ -120,19 +244,36 @@ impl State {
     }
 }
 
-fn run<S: Sink>(s: &mut S, comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec, progressive: bool) {
+/// The scan's MCUs across and down (blocks, for a single component).
+fn geometry(comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec) -> (usize, usize) {
     let members: Vec<usize> = (0..comps.len()).filter(|i| scan.comps & (1 << i) != 0).collect();
-    let single = members.len() == 1;
-    let (mx, my) = if single {
+    if members.len() == 1 {
         let c = &comps[members[0]];
         (c.units_w, c.units_h)
     } else {
         (layout.mcus_x, layout.mcus_y)
-    };
+    }
+}
+
+/// Codes MCUs `mcus` of a scan into `s`. A range that does not start the
+/// scan (only sequential scans without restarts are split) takes its DC
+/// predictions from the blocks just before it. Padding and the end of the
+/// scan are left to the caller.
+fn run<S: Sink>(s: &mut S, comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec, progressive: bool, mcus: std::ops::Range<usize>) {
+    let members: Vec<usize> = (0..comps.len()).filter(|i| scan.comps & (1 << i) != 0).collect();
+    let single = members.len() == 1;
+    let (mx, _) = geometry(comps, layout, scan);
     let mut st = State { pred: vec![0; comps.len()], eobrun: 0, be: Vec::new(), slot: comps[members[0]].table };
-    let total = mx * my;
+    if mcus.start > 0 {
+        let (x, y) = ((mcus.start - 1) % mx, (mcus.start - 1) / mx);
+        for &ci in &members {
+            let c = &comps[ci];
+            let (bh, bv) = if single { (1, 1) } else { (c.h, c.v) };
+            st.pred[ci] = i32::from(c.block(x * bh + bh - 1, y * bv + bv - 1)[0]);
+        }
+    }
     let mut rst = 0u8;
-    for m in 0..total {
+    for m in mcus {
         if layout.restart > 0 && m > 0 && m % layout.restart == 0 {
             st.emit_eobrun(s);
             s.restart(rst);
@@ -168,7 +309,6 @@ fn run<S: Sink>(s: &mut S, comps: &[CompCoefs], layout: &Layout, scan: &ScanSpec
         }
     }
     st.emit_eobrun(s);
-    s.finish();
 }
 
 /// F.1.2.1 and F.1.2.2: a whole block.
@@ -176,24 +316,28 @@ fn sequential<S: Sink>(s: &mut S, st: &mut State, ci: usize, slot: usize, blk: &
     let dc = i32::from(blk[0]);
     let (n, bits) = category(dc - st.pred[ci]);
     st.pred[ci] = dc;
-    s.symbol(slot, false, n as u8);
-    s.bits(bits, n);
-    let mut run = 0u32;
-    for &c in &blk[1..] {
-        if c == 0 {
-            run += 1;
-            continue;
-        }
+    s.symbol_bits(slot, false, n as u8, bits, n);
+    // The non-zero AC coefficients as a bit mask (bit k for zig-zag
+    // position k), visited in order: the runs of zeros between them are the
+    // gaps between set bits.
+    let mut nonzero = 0u64;
+    for (k, &c) in blk.iter().enumerate().skip(1) {
+        nonzero |= u64::from(c != 0) << k;
+    }
+    let mut last = 0u32;
+    while nonzero != 0 {
+        let k = nonzero.trailing_zeros();
+        nonzero &= nonzero - 1;
+        let mut run = k - last - 1;
         while run > 15 {
             s.symbol(slot, true, 0xF0);
             run -= 16;
         }
-        let (n, bits) = category(i32::from(c));
-        s.symbol(slot, true, ((run << 4) | n) as u8);
-        s.bits(bits, n);
-        run = 0;
+        let (n, bits) = category(i32::from(blk[k as usize]));
+        s.symbol_bits(slot, true, ((run << 4) | n) as u8, bits, n);
+        last = k;
     }
-    if run > 0 {
+    if last < 63 {
         s.symbol(slot, true, 0x00);
     }
 }

@@ -92,7 +92,7 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
     let start = dec.pos;
     let strict = dec.opts.strict;
     let ri = usize::from(dec.restart_interval);
-    let Decoder { tables, planes, coefs, comp_quant, warnings, .. } = dec;
+    let Decoder { tables, coefs, warnings, .. } = dec;
     let tables: &Tables = tables;
     let mut ent = if frame.arithmetic {
         Entropy::Arith(Box::new(ArithState {
@@ -119,8 +119,6 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
         }
         Ok(())
     };
-    let level = 1i32 << (frame.precision - 1);
-    let max = (1i32 << frame.precision) - 1;
     let total = geo.mcus_x * geo.mcus_y;
     let mut next_rst = 0u8;
     let mut block = [0i16; 64];
@@ -190,14 +188,10 @@ pub(super) fn decode(dec: &mut Decoder<'_>, frame: &Frame, scan: &Scan) -> Resul
                         block.fill(0);
                         let r = decode_block(&mut ent, tables, scan, si, sc.td, sc.ta, &mut pred[si], &mut block, false);
                         if r.is_ok() {
-                            let q = comp_quant[sc.ci].as_ref().map_or([1u16; 64], |q| *q);
-                            let mut c = [0i32; 64];
-                            for k in 0..64 {
-                                let n = ZIGZAG[k];
-                                c[n] = i32::from(block[k]) * i32::from(q[n]);
-                            }
-                            let off = by * 8 * fc.stride + bx * 8;
-                            idct_to_samples(&c, level, max, &mut planes[sc.ci][off..], fc.stride);
+                            // Kept for the transform after the last scan
+                            // (`idct_all`), which runs on several threads.
+                            let at = (by * fc.blocks_stride + bx) * 64;
+                            coefs[sc.ci][at..at + 64].copy_from_slice(&block);
                         }
                         r
                     };
@@ -580,8 +574,12 @@ impl ArithState<'_> {
     }
 }
 
-/// After a progressive frame (or as much of it as arrived): dequantise and
-/// transform every block into its plane.
+/// After the last scan of a DCT frame (or as much of it as arrived):
+/// dequantise and transform every block into its plane. A progressive
+/// frame's blocks are those covering each component; a sequential frame's
+/// are all of its MCUs' blocks, padding included, as its scans decode
+/// them. Rows of blocks are shared among threads; each block's samples
+/// depend on that block alone, so the result is the same.
 pub(super) fn idct_all(dec: &mut Decoder<'_>, frame: &Frame) {
     let level = 1i32 << (frame.precision - 1);
     let max = (1i32 << frame.precision) - 1;
@@ -589,18 +587,23 @@ pub(super) fn idct_all(dec: &mut Decoder<'_>, frame: &Frame) {
         let q = dec.comp_quant[ci].unwrap_or([1; 64]);
         let coefs = std::mem::take(&mut dec.coefs[ci]);
         let plane = &mut dec.planes[ci];
-        for by in 0..fc.units_h {
-            for bx in 0..fc.units_w {
-                let at = (by * fc.blocks_stride + bx) * 64;
-                let blk = &coefs[at..at + 64];
-                let mut c = [0i32; 64];
-                for k in 0..64 {
-                    let n = ZIGZAG[k];
-                    c[n] = i32::from(blk[k]) * i32::from(q[n]);
+        let (units_w, units_h) =
+            if frame.progressive { (fc.units_w, fc.units_h) } else { (fc.blocks_stride, fc.rows / 8) };
+        let rows = 8 * fc.stride;
+        let used = (units_h * rows).min(plane.len());
+        crate::par::bands(&mut plane[..used], rows, 0, |bys, band| {
+            for (i, by) in bys.enumerate() {
+                for bx in 0..units_w {
+                    let at = (by * fc.blocks_stride + bx) * 64;
+                    let blk = &coefs[at..at + 64];
+                    let mut c = [0i32; 64];
+                    for k in 0..64 {
+                        let n = ZIGZAG[k];
+                        c[n] = i32::from(blk[k]) * i32::from(q[n]);
+                    }
+                    idct_to_samples(&c, level, max, &mut band[i * rows + bx * 8..], fc.stride);
                 }
-                let off = by * 8 * fc.stride + bx * 8;
-                idct_to_samples(&c, level, max, &mut plane[off..], fc.stride);
             }
-        }
+        });
     }
 }

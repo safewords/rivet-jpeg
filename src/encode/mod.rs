@@ -4,7 +4,7 @@
 mod arith;
 mod huff;
 
-use crate::dct::fdct;
+use crate::dct::fdct_quantise;
 use crate::error::{Result, config};
 use crate::huffman::TableSpec;
 use crate::metadata::{EXIF_MAX, ICC_CHUNK};
@@ -237,7 +237,11 @@ pub fn encode(pixels: &[u8], width: u32, height: u32, format: PixelFormat, setti
     } else {
         vec![ScanSpec { comps: if grey { 1 } else { 7 }, ss: 0, se: 63, ah: 0, al: 0 }]
     };
-    for scan in &scans {
+    // Each scan depends only on the coefficients, so a progression's scans
+    // are coded on several threads and joined in order.
+    let coded = crate::par::map(scans.len(), 0, |i| -> Result<Vec<u8>> {
+        let scan = &scans[i];
+        let mut out = Vec::new();
         if settings.arithmetic {
             sos(&mut out, &comps, scan);
             arith::encode_scan(&mut out, &comps, &layout, scan, settings.progressive);
@@ -252,6 +256,10 @@ pub fn encode(pixels: &[u8], width: u32, height: u32, format: PixelFormat, setti
             sos(&mut out, &comps, scan);
             huff::encode_scan(&mut out, &comps, &layout, scan, &tables, settings.progressive)?;
         }
+        Ok(out)
+    });
+    for scan in coded {
+        out.extend_from_slice(&scan?);
     }
     out.extend_from_slice(&[0xFF, 0xD9]);
     Ok(out)
@@ -339,6 +347,10 @@ fn segment(out: &mut Vec<u8>, marker: u8, payload: &[u8]) {
 
 /// Colour conversion (T.871 clause 7), edge extension to whole MCUs, box
 /// downsampling of chroma, FDCT and quantisation.
+///
+/// A row of MCUs depends only on its own pixels, so the rows are prepared
+/// on several threads; each value is computed by the same operations as
+/// on one thread, so the result does not depend on how many there are.
 #[allow(clippy::too_many_arguments)]
 fn prepare(
     pixels: &[u8],
@@ -351,23 +363,73 @@ fn prepare(
     mcus_y: usize,
     qtables: &[[u16; 64]; 2],
 ) -> Vec<CompCoefs> {
-    let bpp = format.bytes();
-    let (pw, ph) = (mcus_x * 8 * hy, mcus_y * 8 * vy);
     let ncomp = if format == PixelFormat::Luma { 1 } else { 3 };
-    // Full-resolution planes, level-shifted, edges replicated.
-    let mut full = vec![vec![0f32; pw * ph]; ncomp];
-    for y in 0..ph {
-        let sy = y.min(h - 1);
-        for x in 0..pw {
-            let sx = x.min(w - 1);
-            let p = &pixels[(sy * w + sx) * bpp..];
-            if ncomp == 1 {
-                full[0][y * pw + x] = f32::from(p[0]) - 128.0;
-            } else {
+    let rows = crate::par::map(mcus_y, 0, |r| {
+        crate::simd::with_wide_vectors(|| prepare_mcu_row(pixels, w, h, format, hy, vy, mcus_x, r, qtables))
+    });
+    let mut out = Vec::with_capacity(ncomp);
+    for ci in 0..ncomp {
+        let (ch, cv) = if ci == 0 { (hy, vy) } else { (1, 1) };
+        let blocks_w = mcus_x * ch;
+        let mut coefs = Vec::with_capacity(blocks_w * mcus_y * cv);
+        for row in &rows {
+            coefs.extend_from_slice(&row[ci]);
+        }
+        // The component's own extent, as a decoder computes it from the
+        // frame header (A.1.1).
+        let comp_w = (w * ch).div_ceil(hy);
+        let comp_h = (h * cv).div_ceil(vy);
+        out.push(CompCoefs {
+            h: ch,
+            v: cv,
+            blocks_w,
+            units_w: comp_w.div_ceil(8),
+            units_h: comp_h.div_ceil(8),
+            coefs,
+            table: usize::from(ci > 0),
+        });
+    }
+    out
+}
+
+/// One row of MCUs (`r`): each component's quantised blocks, row by row.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn prepare_mcu_row(
+    pixels: &[u8],
+    w: usize,
+    h: usize,
+    format: PixelFormat,
+    hy: usize,
+    vy: usize,
+    mcus_x: usize,
+    r: usize,
+    qtables: &[[u16; 64]; 2],
+) -> Vec<Vec<[i16; 64]>> {
+    let bpp = format.bytes();
+    let pw = mcus_x * 8 * hy;
+    let lines = 8 * vy;
+    let ncomp = if format == PixelFormat::Luma { 1 } else { 3 };
+    // Full-resolution lines of the MCU row, level-shifted, edges replicated.
+    let mut full = vec![vec![0f32; pw * lines]; ncomp];
+    for ly in 0..lines {
+        let sy = (r * lines + ly).min(h - 1);
+        let src = &pixels[sy * w * bpp..(sy + 1) * w * bpp];
+        let at = ly * pw;
+        if ncomp == 1 {
+            for (x, o) in full[0][at..at + pw].iter_mut().enumerate() {
+                *o = f32::from(src[x.min(w - 1) * bpp]) - 128.0;
+            }
+        } else {
+            let (l, rest) = full.split_at_mut(1);
+            let (cb, cr) = rest.split_at_mut(1);
+            let (l, cb, cr) = (&mut l[0][at..at + pw], &mut cb[0][at..at + pw], &mut cr[0][at..at + pw]);
+            for x in 0..pw {
+                let p = &src[x.min(w - 1) * bpp..];
                 let (r, g, b) = (f32::from(p[0]), f32::from(p[1]), f32::from(p[2]));
-                full[0][y * pw + x] = 0.299 * r + 0.587 * g + 0.114 * b - 128.0;
-                full[1][y * pw + x] = -0.168_735_9 * r - 0.331_264_1 * g + 0.5 * b;
-                full[2][y * pw + x] = 0.5 * r - 0.418_687_6 * g - 0.081_312_4 * b;
+                l[x] = 0.299 * r + 0.587 * g + 0.114 * b - 128.0;
+                cb[x] = -0.168_735_9 * r - 0.331_264_1 * g + 0.5 * b;
+                cr[x] = 0.5 * r - 0.418_687_6 * g - 0.081_312_4 * b;
             }
         }
     }
@@ -375,13 +437,13 @@ fn prepare(
     for (ci, plane) in full.into_iter().enumerate() {
         let (ch, cv) = if ci == 0 { (hy, vy) } else { (1, 1) };
         let (fx, fy) = (hy / ch, vy / cv);
-        let (cw, chh) = (pw / fx, ph / fy);
+        let (cw, clines) = (pw / fx, lines / fy);
         let plane = if fx == 1 && fy == 1 {
             plane
         } else {
-            let mut d = vec![0f32; cw * chh];
+            let mut d = vec![0f32; cw * clines];
             let n = (fx * fy) as f32;
-            for y in 0..chh {
+            for y in 0..clines {
                 for x in 0..cw {
                     let mut s = 0f32;
                     for dy in 0..fy {
@@ -394,41 +456,25 @@ fn prepare(
             }
             d
         };
-        let table = usize::from(ci > 0);
-        let q = &qtables[table];
+        let q = &qtables[usize::from(ci > 0)];
         let blocks_w = mcus_x * ch;
-        let blocks_h = mcus_y * cv;
-        let mut coefs = Vec::with_capacity(blocks_w * blocks_h);
-        for by in 0..blocks_h {
+        let mut coefs = Vec::with_capacity(blocks_w * cv);
+        for by in 0..cv {
             for bx in 0..blocks_w {
                 let mut s = [0f32; 64];
                 for y in 0..8 {
                     let row = (by * 8 + y) * cw + bx * 8;
                     s[y * 8..y * 8 + 8].copy_from_slice(&plane[row..row + 8]);
                 }
-                let f = fdct(&s);
+                let f = fdct_quantise(&s, q);
                 let mut z = [0i16; 64];
                 for (k, &n) in ZIGZAG.iter().enumerate() {
-                    z[k] = (f[n] / f32::from(q[n])).round() as i16;
+                    z[k] = f[n];
                 }
                 coefs.push(z);
             }
         }
-        // The component's own extent, as a decoder computes it from the
-        // frame header (A.1.1).
-        let hmax = hy;
-        let vmax = vy;
-        let comp_w = (w * ch).div_ceil(hmax);
-        let comp_h = (h * cv).div_ceil(vmax);
-        out.push(CompCoefs {
-            h: ch,
-            v: cv,
-            blocks_w,
-            units_w: comp_w.div_ceil(8),
-            units_h: comp_h.div_ceil(8),
-            coefs,
-            table,
-        });
+        out.push(coefs);
     }
     out
 }

@@ -29,7 +29,8 @@
 //! assert!(pixels.iter().all(|&v| v.abs_diff(200) <= 2));
 //! ```
 
-#![forbid(unsafe_code)]
+// Unsafe code is confined to the run-time CPU dispatch in `simd`.
+#![deny(unsafe_code)]
 #![warn(missing_docs)]
 
 mod arith;
@@ -41,6 +42,8 @@ mod encode;
 mod error;
 mod huffman;
 mod metadata;
+mod par;
+mod simd;
 mod tables;
 
 pub use decode::{
